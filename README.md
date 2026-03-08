@@ -6,7 +6,7 @@ Electron desktop app that repairs STEP files exported from Plasticity (via HOOPS
 
 1. **Part name repair** — PRODUCT entities with name `'0'` are replaced with the real part name from NAUO instance labels.
 2. **Disconnected shell split** — Solids that contain multiple geometrically disconnected face regions are split into separate solids.
-3. **HOOPS Exchange compatibility** — Per-face color overrides that cause partial MDGPR coverage are stripped; some readers (Creo, Keyshot) otherwise misinterpret this as a second geometric body and import the part as "2 sheets".
+3. **HOOPS Exchange compatibility** — Per-face color overrides that cause partial MDGPR coverage are stripped; CAD standard readers (Creo, Solidworks, Keyshot, etc.) otherwise misinterpret this as a second geometric body and import the part as "2 sheets".
 
 ## Requirements
 
