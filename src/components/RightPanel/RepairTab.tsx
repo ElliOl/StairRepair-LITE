@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { DropZone } from './DropZone'
 import { OptionsPanel } from './OptionsPanel'
-import { FileList } from './FileList'
+import { FileInfoPanel } from './FileInfoPanel'
 import { LogPanel } from './LogPanel'
 import { useAppStore } from '../../stores/appStore'
 import { useRepairActions } from '../../hooks/useRepairActions'
@@ -15,8 +15,11 @@ export function RepairTab() {
 
   const onDrop = React.useCallback(
     (paths: string[]) => {
-      addFiles(paths)
-      paths.forEach((p) => analyseFile(p))
+      if (paths.length) {
+        const path = paths[0]
+        addFiles([path])
+        analyseFile(path)
+      }
     },
     [addFiles, analyseFile],
   )
@@ -37,14 +40,14 @@ export function RepairTab() {
           <div className="my-4">
             <Separator className="border-border" />
           </div>
-          <FileList />
+          <FileInfoPanel />
           {canFixAll && (
             <button
               type="button"
               className="btn btn-accent w-full mt-3"
               onClick={() => handleRepairAll(readyFiles, options)}
             >
-              Fix All ({readyFiles.length})
+              Fix All
             </button>
           )}
         </>

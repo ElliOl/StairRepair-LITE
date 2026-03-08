@@ -9,6 +9,9 @@ interface AppState {
   model: ViewerModel | null
   currentFileName: string | null
   loading: boolean
+  loadingStage: string
+  loadingLogs: string[]
+  loadingProgress: number
   // Viewer display settings
   showEdges: boolean
   meshQuality: 'fast' | 'standard' | 'fine'
@@ -27,6 +30,10 @@ interface AppState {
   clearLog: () => void
   setModel: (model: ViewerModel | null, fileName?: string | null) => void
   setLoading: (v: boolean) => void
+  setLoadingStage: (stage: string) => void
+  addLoadingLog: (line: string) => void
+  clearLoadingState: () => void
+  setLoadingProgress: (progress: number) => void
   setShowEdges: (v: boolean) => void
   setMeshQuality: (q: 'fast' | 'standard' | 'fine') => void
   setUpAxis: (axis: '+Y' | '+Z') => void
@@ -46,6 +53,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   model: null,
   currentFileName: null,
   loading: false,
+  loadingStage: '',
+  loadingLogs: [],
+  loadingProgress: 0,
   showEdges: true,
   meshQuality: 'standard',
   upAxis: '+Y',
@@ -56,15 +66,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addFiles: (paths) =>
     set((state) => {
-      const existing = new Set(state.files.map((f) => f.filepath))
-      const added = paths
-        .filter((p) => !existing.has(p))
-        .map((filepath) => ({
-          filepath,
-          name: filepath.split(/[/\\]/).pop() ?? filepath,
-          status: 'idle' as const,
-        }))
-      return { files: [...state.files, ...added] }
+      // Single file only: new upload replaces the old one
+      const path = paths[0]
+      if (!path) return state
+      const file = {
+        filepath: path,
+        name: path.split(/[/\\]/).pop() ?? path,
+        status: 'idle' as const,
+      }
+      return {
+        files: [file],
+        model: null,
+        currentFileName: null,
+      }
     }),
 
   removeFile: (filepath) =>
@@ -98,6 +112,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
 
   setLoading: (v) => set({ loading: v }),
+
+  setLoadingStage: (stage) => set({ loadingStage: stage }),
+
+  addLoadingLog: (line) =>
+    set((state) => ({ loadingLogs: [...state.loadingLogs, line] })),
+
+  clearLoadingState: () => set({ loadingLogs: [], loadingProgress: 0, loadingStage: '' }),
+
+  setLoadingProgress: (progress) => set({ loadingProgress: progress }),
 
   setShowEdges: (v) => set({ showEdges: v }),
 

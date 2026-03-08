@@ -14,7 +14,7 @@ export function DropZone({ onBrowse, onDrop }: DropZoneProps) {
       e.preventDefault()
       setDrag(false)
       const paths = Array.from(e.dataTransfer.files).map((f) => f.path).filter((p) => /\.(stp|step)$/i.test(p))
-      if (paths.length) onDrop(paths)
+      if (paths.length) onDrop([paths[0]])
     },
     [onDrop]
   )
@@ -35,7 +35,7 @@ export function DropZone({ onBrowse, onDrop }: DropZoneProps) {
       onDragLeave={handleDragLeave}
     >
       <Upload className="mx-auto mb-2 w-8 h-8 text-text-muted" />
-      <p className="text-sm text-text-muted mb-2">Drop .stp / .step files or</p>
+      <p className="text-sm text-text-muted mb-2">Drop a .stp / .step file or</p>
       <button type="button" className="btn btn-secondary text-sm" onClick={onBrowse}>
         Browse
       </button>

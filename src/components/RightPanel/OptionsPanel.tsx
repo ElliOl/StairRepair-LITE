@@ -18,7 +18,7 @@ function OptionRow({
       <div className="flex flex-col gap-0.5 pt-0.5">
         <span className="text-sm text-text leading-tight">{label}</span>
         {description && (
-          <span className="text-xs text-text-muted leading-tight">{description}</span>
+          <span className="text-[10px] text-text-muted leading-tight">{description}</span>
         )}
       </div>
       <SwitchPrimitive.Root
@@ -45,14 +45,14 @@ export function OptionsPanel() {
           onCheckedChange={(v) => setOptions({ fixNames: v })}
         />
         <OptionRow
-          label="Split disconnected shells"
-          description="Separate solids with multiple unconnected face groups"
+          label="Split disconnected solids"
+          description="When a solid contains multiple unconnected face groups, split into separate solids"
           checked={options.fixShells}
           onCheckedChange={(v) => setOptions({ fixShells: v })}
         />
         <OptionRow
           label="Fix HOOPS Exchange compatibility"
-          description="Rewrite STEP structure to fix Creo/Keyshot '2 sheets' import issue"
+          description="Strip per-face color overrides that can cause geometry import errors"
           checked={options.fixHoopsCompat}
           onCheckedChange={(v) => setOptions({ fixHoopsCompat: v })}
         />

@@ -39,7 +39,7 @@ app.on('window-all-closed', () => app.quit())
 
 ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog({
-    properties: ['openFile', 'multiSelections'],
+    properties: ['openFile'],
     filters: [
       { name: 'STEP', extensions: ['stp', 'step'] },
       { name: 'All', extensions: ['*'] },

@@ -9,12 +9,26 @@ import { useAppStore } from './stores/appStore'
 import { useRepairActions } from './hooks/useRepairActions'
 import { convertPartsToFileTree, getAllPartIdsInSubtree } from './utils/partTreeUtils'
 
+function parseProgressFromLog(log: string): number | null {
+  const bracketMatch = log.match(/\[(\d+)\/(\d+)\]/)
+  if (bracketMatch) {
+    const done = parseInt(bracketMatch[1], 10)
+    const total = parseInt(bracketMatch[2], 10)
+    if (total > 0) return Math.round((done / total) * 100)
+  }
+  const percentMatch = log.match(/\b(\d{1,3})%/)
+  if (percentMatch) return parseInt(percentMatch[1], 10)
+  return null
+}
+
 export default function App() {
   const model = useAppStore((s) => s.model)
   const currentFileName = useAppStore((s) => s.currentFileName)
   const loading = useAppStore((s) => s.loading)
   const showEdges = useAppStore((s) => s.showEdges)
   const appendLog = useAppStore((s) => s.appendLog)
+  const addLoadingLog = useAppStore((s) => s.addLoadingLog)
+  const setLoadingProgress = useAppStore((s) => s.setLoadingProgress)
   const addFiles = useAppStore((s) => s.addFiles)
   const { handleBrowse, analyseFile } = useRepairActions()
 
@@ -36,9 +50,17 @@ export default function App() {
   const [viewRotationZ, setViewRotationZ] = React.useState(0)
 
   React.useEffect(() => {
-    const cleanup = window.electronAPI?.onBackendLog?.(appendLog)
+    const cleanup = window.electronAPI?.onBackendLog?.((msg: string) => {
+      appendLog(msg)
+      // Mirror to loading overlay while an operation is in progress
+      if (useAppStore.getState().loading) {
+        addLoadingLog(msg)
+        const parsed = parseProgressFromLog(msg)
+        if (parsed !== null) setLoadingProgress(parsed)
+      }
+    })
     return () => cleanup?.()
-  }, [appendLog])
+  }, [appendLog, addLoadingLog, setLoadingProgress])
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -71,8 +93,9 @@ export default function App() {
         .map((f) => f.path)
         .filter((p) => /\.(stp|step)$/i.test(p))
       if (paths.length) {
-        addFiles(paths)
-        paths.forEach((p) => analyseFile(p))
+        const path = paths[0]
+        addFiles([path])
+        analyseFile(path)
       }
     },
     [addFiles, analyseFile],
@@ -99,6 +122,9 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen bg-background overflow-hidden min-w-[800px] relative">
+      {/* Full-app loading overlay — fixed so it covers everything */}
+      <LoadingOverlay />
+
       {/* Left: viewport column */}
       <div className="flex-1 min-w-[400px] flex flex-col relative">
         <FileHeader fileName={currentFileName} />
@@ -120,7 +146,6 @@ export default function App() {
               viewRotationZ={viewRotationZ}
             />
 
-            {loading && <LoadingOverlay />}
             {!model && !loading && <EmptyState onBrowse={handleBrowse} />}
 
             {/* Part tree drawer — absolute over the viewport */}
