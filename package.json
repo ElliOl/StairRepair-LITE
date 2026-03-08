@@ -1,0 +1,85 @@
+{
+  "name": "step-fixer",
+  "version": "0.1.0",
+  "description": "Repair STEP files exported from Plasticity for SolidWorks, Creo, Keyshot",
+  "main": "./out/main/index.js",
+  "author": "",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "build:native": "cd native && npm run build",
+    "pack": "npm run build && npm run build:native && electron-builder --dir",
+    "dist": "npm run build && npm run build:native && electron-builder"
+  },
+  "dependencies": {
+    "@radix-ui/react-accordion": "^1.1.2",
+    "@radix-ui/react-context-menu": "^2.2.16",
+    "@radix-ui/react-dialog": "^1.0.5",
+    "@radix-ui/react-separator": "^1.0.3",
+    "@radix-ui/react-switch": "^1.0.3",
+    "@radix-ui/react-tooltip": "^1.0.7",
+    "@radix-ui/themes": "^3.2.1",
+    "@react-three/drei": "^9.100.0",
+    "@react-three/fiber": "^8.15.0",
+    "lucide-react": "^0.554.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-hot-toast": "^2.4.1",
+    "three": "^0.162.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "@types/react": "^18.2.56",
+    "@types/react-dom": "^18.2.19",
+    "@types/three": "^0.162.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.0",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.0"
+  },
+  "build": {
+    "appId": "com.stepfixer.app",
+    "productName": "StepFixer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "native/build/Release/step_fixer_native.node"
+    ],
+    "asarUnpack": [
+      "native/build/Release/step_fixer_native.node"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Graphics"
+    }
+  }
+}
