@@ -2,24 +2,40 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
-  openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
-  showSaveDialog: (options: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) =>
-    ipcRenderer.invoke('show-save-dialog', options),
-  writeFile: (filepath: string, content: Buffer) => ipcRenderer.invoke('write-file', filepath, content),
 
-  analyseStep: (filepath: string, quality?: string) => ipcRenderer.invoke('analyse-step', filepath, quality),
-  repairStep: (filepath: string, outputPath: string, options: { fixNames: boolean; fixShells: boolean; fixHoopsCompat: boolean }) =>
-    ipcRenderer.invoke('repair-step', filepath, outputPath, options),
-  loadStepMesh: (filepath: string, quality?: string) => ipcRenderer.invoke('load-step-mesh', filepath, quality),
+  // Settings
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  setSettings: (updates: Record<string, unknown>) => ipcRenderer.invoke('set-settings', updates),
 
-  onBackendLog: (callback: (msg: string) => void) => {
-    const listener = (_: unknown, msg: string) => callback(msg)
-    ipcRenderer.on('backend-log', listener)
-    return () => ipcRenderer.removeListener('backend-log', listener)
+  // Folder management
+  addWatchFolder: () => ipcRenderer.invoke('add-watch-folder'),
+  removeWatchFolder: (folder: string) => ipcRenderer.invoke('remove-watch-folder', folder),
+
+  // Watcher control
+  toggleWatching: (on: boolean) => ipcRenderer.invoke('toggle-watching', on),
+
+  // Recent fixes
+  getRecentFixes: () => ipcRenderer.invoke('get-recent-fixes'),
+
+  // Manual fix
+  pickFile: () => ipcRenderer.invoke('pick-file'),
+  analyseFile: (filepath: string) => ipcRenderer.invoke('analyse-file', filepath),
+  repairFile: (filepath: string, fixNames: boolean, fixHoopsCompat: boolean) =>
+    ipcRenderer.invoke('repair-file', filepath, fixNames, fixHoopsCompat),
+
+  // Events from main → renderer
+  onFixApplied: (callback: (result: unknown) => void) => {
+    const listener = (_: unknown, result: unknown) => callback(result)
+    ipcRenderer.on('fix-applied', listener)
+    return () => ipcRenderer.removeListener('fix-applied', listener)
+  },
+  onWatchStatus: (callback: (status: { watching: boolean; folders: string[] }) => void) => {
+    const listener = (_: unknown, status: { watching: boolean; folders: string[] }) => callback(status)
+    ipcRenderer.on('watch-status', listener)
+    return () => ipcRenderer.removeListener('watch-status', listener)
   },
 
-  windowMinimize: () => ipcRenderer.invoke('window-minimize'),
-  windowMaximize: () => ipcRenderer.invoke('window-maximize'),
+  // Window controls
   windowClose: () => ipcRenderer.invoke('window-close'),
-  windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  quitApp: () => ipcRenderer.invoke('quit-app'),
 })

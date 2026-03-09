@@ -1,6 +1,6 @@
 import * as React from 'react'
 import * as SwitchPrimitive from '@radix-ui/react-switch'
-import { useAppStore } from '../../stores/appStore'
+import { useAppStore } from '../stores/appStore'
 
 function OptionRow({
   label,
@@ -32,29 +32,30 @@ function OptionRow({
   )
 }
 
-export function OptionsPanel() {
+export function OptionsPanel({ onSettingsChange }: { onSettingsChange?: () => void }) {
   const { options, setOptions } = useAppStore()
+
+  const update = (updates: Partial<typeof options>) => {
+    setOptions(updates)
+    window.electronAPI.setSettings(updates).catch(console.error)
+    onSettingsChange?.()
+  }
+
   return (
     <div className="space-y-3">
       <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Options</p>
       <div className="space-y-3">
         <OptionRow
           label="Fix part names"
-          description="Copy NAUO instance names to unnamed prototypes"
+          description="Rename unnamed PRODUCT entities from NAUO / MSB chain"
           checked={options.fixNames}
-          onCheckedChange={(v) => setOptions({ fixNames: v })}
+          onCheckedChange={(v) => update({ fixNames: v })}
         />
         <OptionRow
-          label="Split disconnected solids"
-          description="When a solid contains multiple unconnected face groups, split into separate solids"
-          checked={options.fixShells}
-          onCheckedChange={(v) => setOptions({ fixShells: v })}
-        />
-        <OptionRow
-          label="Fix HOOPS Exchange compatibility"
-          description="Strip per-face color overrides that can cause geometry import errors"
+          label="Fix HOOPS Exchange compat"
+          description="Strip per-face color overrides that cause import errors in Creo & Keyshot"
           checked={options.fixHoopsCompat}
-          onCheckedChange={(v) => setOptions({ fixHoopsCompat: v })}
+          onCheckedChange={(v) => update({ fixHoopsCompat: v })}
         />
       </div>
     </div>

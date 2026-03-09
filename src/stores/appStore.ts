@@ -1,169 +1,58 @@
 import { create } from 'zustand'
-import type { FileEntry, RepairOptions, ViewerModel } from '../types'
-import { getAllDescendantIds } from '../utils/partTreeUtils'
+import type { FixResult, ManualAnalysis, RepairOptions } from '../types'
 
 interface AppState {
-  files: FileEntry[]
+  // Settings / watcher state (loaded from main process)
+  watchFolders: string[]
+  watching: boolean
   options: RepairOptions
-  log: string[]
-  model: ViewerModel | null
-  currentFileName: string | null
-  loading: boolean
-  loadingStage: string
-  loadingLogs: string[]
-  loadingProgress: number
-  // Viewer display settings
-  showEdges: boolean
-  meshQuality: 'fast' | 'standard' | 'fine'
-  upAxis: '+Y' | '+Z'
-  // Part tree UI
-  showPartTree: boolean
-  partVisibility: Record<string, boolean>
-  selectedPartIds: Set<string>
-  hoveredPartId: string | null
+  launchAtLogin: boolean
+
+  // Recent auto-fixes from watcher
+  recentFixes: FixResult[]
+
+  // Manual one-off fix state
+  manualAnalysis: ManualAnalysis | null
+
   // Actions
-  addFiles: (paths: string[]) => void
-  removeFile: (filepath: string) => void
-  setFileStatus: (filepath: string, status: FileEntry['status'], payload?: Partial<FileEntry>) => void
+  setWatchFolders: (folders: string[]) => void
+  addWatchFolder: (folder: string) => void
+  removeWatchFolder: (folder: string) => void
+  setWatching: (v: boolean) => void
   setOptions: (opts: Partial<RepairOptions>) => void
-  appendLog: (line: string) => void
-  clearLog: () => void
-  setModel: (model: ViewerModel | null, fileName?: string | null) => void
-  setLoading: (v: boolean) => void
-  setLoadingStage: (stage: string) => void
-  addLoadingLog: (line: string) => void
-  clearLoadingState: () => void
-  setLoadingProgress: (progress: number) => void
-  setShowEdges: (v: boolean) => void
-  setMeshQuality: (q: 'fast' | 'standard' | 'fine') => void
-  setUpAxis: (axis: '+Y' | '+Z') => void
-  // Part tree actions
-  togglePartTree: () => void
-  setShowPartTree: (v: boolean) => void
-  setPartVisibility: (nodeId: string, visible: boolean) => void
-  selectPart: (nodeId: string, mode: 'replace' | 'add' | 'subtract') => void
-  selectAllParts: (ids: string[]) => void
-  setHoveredPart: (id: string | null) => void
+  setLaunchAtLogin: (v: boolean) => void
+  addRecentFix: (fix: FixResult) => void
+  setRecentFixes: (fixes: FixResult[]) => void
+  setManualAnalysis: (a: ManualAnalysis | null) => void
+  updateManualAnalysis: (updates: Partial<ManualAnalysis>) => void
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
-  files: [],
-  options: { fixNames: true, fixShells: false, fixHoopsCompat: true },
-  log: [],
-  model: null,
-  currentFileName: null,
-  loading: false,
-  loadingStage: '',
-  loadingLogs: [],
-  loadingProgress: 0,
-  showEdges: true,
-  meshQuality: 'fast',
-  upAxis: '+Y',
-  showPartTree: false,
-  partVisibility: {},
-  selectedPartIds: new Set(),
-  hoveredPartId: null,
+export const useAppStore = create<AppState>((set) => ({
+  watchFolders: [],
+  watching: false,
+  options: { fixNames: true, fixHoopsCompat: true },
+  launchAtLogin: false,
+  recentFixes: [],
+  manualAnalysis: null,
 
-  addFiles: (paths) =>
-    set((state) => {
-      // Single file only: new upload replaces the old one
-      const path = paths[0]
-      if (!path) return state
-      const file = {
-        filepath: path,
-        name: path.split(/[/\\]/).pop() ?? path,
-        status: 'idle' as const,
-      }
-      return {
-        files: [file],
-        model: null,
-        currentFileName: null,
-      }
-    }),
-
-  removeFile: (filepath) =>
-    set((state) => ({ files: state.files.filter((f) => f.filepath !== filepath) })),
-
-  setFileStatus: (filepath, status, payload) =>
+  setWatchFolders: (folders) => set({ watchFolders: folders }),
+  addWatchFolder: (folder) =>
     set((state) => ({
-      files: state.files.map((f) =>
-        f.filepath === filepath ? { ...f, status, ...payload } : f,
-      ),
+      watchFolders: state.watchFolders.includes(folder)
+        ? state.watchFolders
+        : [...state.watchFolders, folder],
     })),
-
-  setOptions: (opts) =>
-    set((state) => ({ options: { ...state.options, ...opts } })),
-
-  appendLog: (line) =>
-    set((state) => ({ log: [...state.log, line] })),
-
-  clearLog: () => set({ log: [] }),
-
-  setModel: (model, fileName) =>
-    set({
-      model,
-      currentFileName: fileName ?? null,
-      // Reset part tree interaction state when a new model is loaded
-      selectedPartIds: new Set(),
-      hoveredPartId: null,
-      partVisibility: model
-        ? Object.fromEntries(model.parts.map((p) => [p.id, true]))
-        : {},
-    }),
-
-  setLoading: (v) => set({ loading: v }),
-
-  setLoadingStage: (stage) => set({ loadingStage: stage }),
-
-  addLoadingLog: (line) =>
-    set((state) => ({ loadingLogs: [...state.loadingLogs, line] })),
-
-  clearLoadingState: () => set({ loadingLogs: [], loadingProgress: 0, loadingStage: '' }),
-
-  setLoadingProgress: (progress) => set({ loadingProgress: progress }),
-
-  setShowEdges: (v) => set({ showEdges: v }),
-
-  setMeshQuality: (q) => set({ meshQuality: q }),
-
-  setUpAxis: (axis) => set({ upAxis: axis }),
-
-  togglePartTree: () => set((state) => ({ showPartTree: !state.showPartTree })),
-
-  setShowPartTree: (v) => set({ showPartTree: v }),
-
-  setPartVisibility: (nodeId, visible) =>
-    set((state) => {
-      const parts = state.model?.parts ?? []
-      // Cascade visibility to all descendants
-      const ids = getAllDescendantIds(nodeId, parts)
-      const updated = { ...state.partVisibility }
-      ids.forEach((id) => {
-        updated[id] = visible
-      })
-      return { partVisibility: updated }
-    }),
-
-  selectPart: (nodeId, mode) =>
-    set((state) => {
-      const next = new Set(state.selectedPartIds)
-      if (mode === 'replace') {
-        next.clear()
-        next.add(nodeId)
-      } else if (mode === 'add') {
-        next.add(nodeId)
-      } else {
-        next.delete(nodeId)
-      }
-      return { selectedPartIds: next }
-    }),
-
-  selectAllParts: (ids) =>
-    set((state) => {
-      const next = new Set(state.selectedPartIds)
-      ids.forEach((id) => next.add(id))
-      return { selectedPartIds: next }
-    }),
-
-  setHoveredPart: (id) => set({ hoveredPartId: id }),
+  removeWatchFolder: (folder) =>
+    set((state) => ({ watchFolders: state.watchFolders.filter((f) => f !== folder) })),
+  setWatching: (v) => set({ watching: v }),
+  setOptions: (opts) => set((state) => ({ options: { ...state.options, ...opts } })),
+  setLaunchAtLogin: (v) => set({ launchAtLogin: v }),
+  addRecentFix: (fix) =>
+    set((state) => ({ recentFixes: [fix, ...state.recentFixes].slice(0, 50) })),
+  setRecentFixes: (fixes) => set({ recentFixes: fixes }),
+  setManualAnalysis: (a) => set({ manualAnalysis: a }),
+  updateManualAnalysis: (updates) =>
+    set((state) =>
+      state.manualAnalysis ? { manualAnalysis: { ...state.manualAnalysis, ...updates } } : state,
+    ),
 }))

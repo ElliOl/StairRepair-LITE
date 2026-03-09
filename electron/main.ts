@@ -1,18 +1,206 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  ipcMain,
+  dialog,
+  Notification,
+  nativeImage,
+  screen,
+} from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import * as NativeBridge from './native-bridge'
+import fsSync from 'node:fs'
+import chokidar from 'chokidar'
 
-let win: BrowserWindow | null = null
+// ---- Repair engine (pure TS, no native addon) ----------------------------
+// Import via absolute path so electron-vite bundles them into main
+import { analyseStepContent } from '../src/lib/stepAnalyse'
+import { repairStepContent } from '../src/lib/stepRepair'
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+let tray: Tray | null = null
+let popupWin: BrowserWindow | null = null
+let watcher: ReturnType<typeof chokidar.watch> | null = null
+let isWatching = false
+
 const isMac = process.platform === 'darwin'
 
-function createWindow() {
-  win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+interface AppSettings {
+  watchFolders: string[]
+  fixNames: boolean
+  fixHoopsCompat: boolean
+  launchAtLogin: boolean
+}
+
+interface FixResult {
+  filepath: string
+  name: string
+  timestamp: number
+  namesFlagged: number
+  hoopsCompatFixes: number
+  namesFFixed: number
+  hoopsFixed: number
+  hadIssues: boolean
+}
+
+const recentFixes: FixResult[] = []
+const MAX_RECENT = 50
+
+// Settings persisted to disk — path resolved lazily after app is ready
+function getSettingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json')
+}
+
+function loadSettings(): AppSettings {
+  try {
+    const raw = fsSync.readFileSync(getSettingsPath(), 'utf-8')
+    return { fixNames: true, fixHoopsCompat: true, launchAtLogin: false, watchFolders: [], ...JSON.parse(raw) }
+  } catch {
+    return { watchFolders: [], fixNames: true, fixHoopsCompat: true, launchAtLogin: false }
+  }
+}
+
+function saveSettings(s: AppSettings) {
+  const sp = getSettingsPath()
+  fsSync.mkdirSync(path.dirname(sp), { recursive: true })
+  fsSync.writeFileSync(sp, JSON.stringify(s, null, 2))
+}
+
+let settings: AppSettings = { watchFolders: [], fixNames: true, fixHoopsCompat: true, launchAtLogin: false }
+
+// ---------------------------------------------------------------------------
+// File watcher
+// ---------------------------------------------------------------------------
+
+// Debounce map: filepath → timer
+const debounceMap = new Map<string, ReturnType<typeof setTimeout>>()
+
+async function processFile(filepath: string) {
+  const name = path.basename(filepath)
+  let content: string
+  try {
+    content = await fs.readFile(filepath, 'utf-8')
+  } catch {
+    return // file may have been moved/deleted; skip
+  }
+
+  const analysis = analyseStepContent(content)
+  const { namesFlagged, hoopsCompatFixes } = analysis
+
+  const result = repairStepContent(content, settings.fixNames, settings.fixHoopsCompat)
+  const hadIssues = result.namesFlagged > 0 || result.hoopsFixesApplied > 0
+
+  let outputPath = filepath
+  if (hadIssues) {
+    const ext = path.extname(filepath)
+    const base = filepath.slice(0, filepath.length - ext.length)
+    outputPath = `${base}_fixed${ext}`
+    await fs.writeFile(outputPath, result.content, 'utf-8')
+  }
+
+  const fixResult: FixResult = {
+    filepath: outputPath,
+    name,
+    timestamp: Date.now(),
+    namesFlagged,
+    hoopsCompatFixes,
+    namesFFixed: result.namesFlagged,
+    hoopsFixed: result.hoopsFixesApplied,
+    hadIssues,
+  }
+
+  recentFixes.unshift(fixResult)
+  if (recentFixes.length > MAX_RECENT) recentFixes.length = MAX_RECENT
+
+  // Push update to renderer if open
+  popupWin?.webContents.send('fix-applied', fixResult)
+
+  // Native notification
+  if (Notification.isSupported()) {
+    const parts: string[] = []
+    if (result.namesFlagged > 0) parts.push(`${result.namesFlagged} name(s) fixed`)
+    if (result.hoopsFixesApplied > 0) parts.push('HOOPS compat applied')
+    const body = hadIssues ? parts.join(', ') : 'No issues found'
+    new Notification({ title: `StairRepair — ${name}`, body }).show()
+  }
+}
+
+function onFileEvent(filepath: string) {
+  // Ignore already-fixed output files to avoid infinite loops
+  if (/_fixed\.(stp|step)$/i.test(filepath)) return
+
+  // Debounce: wait 800ms after last event for the same file
+  const existing = debounceMap.get(filepath)
+  if (existing) clearTimeout(existing)
+  debounceMap.set(
+    filepath,
+    setTimeout(() => {
+      debounceMap.delete(filepath)
+      processFile(filepath).catch(console.error)
+    }, 800),
+  )
+}
+
+function startWatcher() {
+  if (watcher) {
+    watcher.close()
+    watcher = null
+  }
+  if (settings.watchFolders.length === 0) return
+
+  watcher = chokidar.watch(settings.watchFolders, {
+    ignored: [
+      /(^|[/\\])\./,          // dotfiles
+      /_fixed\.(stp|step)$/i, // already-fixed output
+    ],
+    persistent: true,
+    ignoreInitial: true,
+    depth: 99,
+    awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
+  })
+
+  watcher.on('add', (fp) => { if (/\.(stp|step)$/i.test(fp)) onFileEvent(fp) })
+  watcher.on('change', (fp) => { if (/\.(stp|step)$/i.test(fp)) onFileEvent(fp) })
+
+  isWatching = true
+  popupWin?.webContents.send('watch-status', { watching: true, folders: settings.watchFolders })
+}
+
+function stopWatcher() {
+  if (watcher) { watcher.close(); watcher = null }
+  isWatching = false
+  popupWin?.webContents.send('watch-status', { watching: false, folders: settings.watchFolders })
+}
+
+// ---------------------------------------------------------------------------
+// Tray popup window
+// ---------------------------------------------------------------------------
+
+function getIconPath() {
+  // macOS: resources/tray-iconTemplate.png — 16x16 black strokes on transparent bg
+  //        macOS auto-inverts to white on dark menu bars
+  // Windows: resources/tray-icon.png — any colour, any reasonable size
+  const name = isMac ? 'tray-iconTemplate.png' : 'tray-icon.png'
+  return path.join(__dirname, '../../resources', name)
+}
+
+function createPopup() {
+  popupWin = new BrowserWindow({
+    width: 380,
+    height: 560,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    transparent: false,
     backgroundColor: '#0a0a0a',
-    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
-    ...(isMac && { trafficLightPosition: { x: 10, y: 10 } }),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -21,81 +209,202 @@ function createWindow() {
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    win.loadURL(process.env.ELECTRON_RENDERER_URL)
-    win.webContents.openDevTools()
+    popupWin.loadURL(process.env.ELECTRON_RENDERER_URL)
+    if (process.env.NODE_ENV === 'development') popupWin.webContents.openDevTools({ mode: 'detach' })
   } else {
-    win.loadFile(path.join(__dirname, '../renderer/index.html'))
+    popupWin.loadFile(path.join(__dirname, '../renderer/index.html'))
+  }
+
+  // Hide on blur (click outside)
+  popupWin.on('blur', () => {
+    if (process.env.NODE_ENV !== 'development') popupWin?.hide()
+  })
+
+  popupWin.on('closed', () => { popupWin = null })
+}
+
+function positionPopup() {
+  if (!popupWin || !tray) return
+  const trayBounds = tray.getBounds()
+  const winBounds = popupWin.getBounds()
+  const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y })
+  const workArea = display.workArea
+
+  let x = Math.round(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2)
+  let y: number
+
+  if (isMac) {
+    // Below menubar
+    y = Math.round(trayBounds.y + trayBounds.height + 4)
+  } else {
+    // Above system tray (Windows taskbar typically at bottom)
+    y = Math.round(trayBounds.y - winBounds.height - 4)
+  }
+
+  // Clamp to work area
+  x = Math.max(workArea.x + 4, Math.min(x, workArea.x + workArea.width - winBounds.width - 4))
+  y = Math.max(workArea.y + 4, Math.min(y, workArea.y + workArea.height - winBounds.height - 4))
+
+  popupWin.setPosition(x, y, false)
+}
+
+function togglePopup() {
+  if (!popupWin) return
+  if (popupWin.isVisible()) {
+    popupWin.hide()
+  } else {
+    positionPopup()
+    popupWin.show()
+    popupWin.focus()
   }
 }
 
+// ---------------------------------------------------------------------------
+// App lifecycle
+// ---------------------------------------------------------------------------
+
 app.whenReady().then(() => {
-  createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  // Load settings now that app.getPath() is available
+  settings = loadSettings()
+
+  // Hide from Dock on macOS — tray-only app
+  if (isMac) app.dock.hide()
+
+  // Create tray
+  // 32x32 PNG is the @2x Retina version — register it at scaleFactor 2 so macOS
+  // renders it at 16pt (correct menu bar size) on Retina displays
+  const iconPath = getIconPath()
+  const raw = nativeImage.createFromPath(iconPath)
+  const icon = nativeImage.createEmpty()
+  icon.addRepresentation({ scaleFactor: 2.0, buffer: raw.toPNG(), width: 32, height: 32 })
+  if (isMac) icon.setTemplateImage(true)
+  tray = new Tray(icon)
+  tray.setToolTip('StairRepair')
+
+  if (isMac) {
+    tray.on('click', togglePopup)
+    tray.on('right-click', () => {
+      tray?.popUpContextMenu(
+        Menu.buildFromTemplate([
+          { label: 'Open', click: togglePopup },
+          { type: 'separator' },
+          { label: 'Quit', click: () => app.quit() },
+        ]),
+      )
+    })
+  } else {
+    // Windows: left-click opens popup, right-click shows context menu
+    tray.on('click', togglePopup)
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Open', click: togglePopup },
+        { type: 'separator' },
+        { label: 'Quit', click: () => app.quit() },
+      ]),
+    )
+  }
+
+  createPopup()
+
+  // Auto-start watcher if folders are configured
+  if (settings.watchFolders.length > 0) startWatcher()
 })
 
-app.on('window-all-closed', () => app.quit())
+// Keep app running even if all windows are closed (tray-only)
+app.on('window-all-closed', () => {
+  // Do NOT quit — we live in the tray
+})
 
-ipcMain.handle('open-file-dialog', async () => {
+// ---------------------------------------------------------------------------
+// IPC handlers
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('get-settings', () => ({
+  ...settings,
+  watching: isWatching,
+  recentFixes,
+}))
+
+ipcMain.handle('set-settings', (_event, updates: Partial<AppSettings>) => {
+  settings = { ...settings, ...updates }
+  saveSettings(settings)
+
+  if ('launchAtLogin' in updates) {
+    app.setLoginItemSettings({ openAtLogin: !!updates.launchAtLogin })
+  }
+
+  return settings
+})
+
+ipcMain.handle('add-watch-folder', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    message: 'Choose a folder to watch for STEP files',
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  const folder = result.filePaths[0]
+  if (!settings.watchFolders.includes(folder)) {
+    settings.watchFolders = [...settings.watchFolders, folder]
+    saveSettings(settings)
+    if (isWatching) startWatcher() // restart with updated list
+  }
+  return folder
+})
+
+ipcMain.handle('remove-watch-folder', (_event, folder: string) => {
+  settings.watchFolders = settings.watchFolders.filter((f) => f !== folder)
+  saveSettings(settings)
+  if (isWatching) {
+    if (settings.watchFolders.length === 0) stopWatcher()
+    else startWatcher()
+  }
+  return settings.watchFolders
+})
+
+ipcMain.handle('toggle-watching', (_event, on: boolean) => {
+  if (on) startWatcher()
+  else stopWatcher()
+  return isWatching
+})
+
+ipcMain.handle('get-recent-fixes', () => recentFixes)
+
+ipcMain.handle('pick-file', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openFile'],
-    filters: [
-      { name: 'STEP', extensions: ['stp', 'step'] },
-      { name: 'All', extensions: ['*'] },
-    ],
+    filters: [{ name: 'STEP Files', extensions: ['stp', 'step'] }],
   })
-  if (result.canceled) return []
-  return result.filePaths
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
 })
 
-ipcMain.handle('show-save-dialog', async (_event, options: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
-  const result = await dialog.showSaveDialog({
-    defaultPath: options?.defaultPath,
-    filters: options?.filters ?? [{ name: 'STEP', extensions: ['stp'] }],
-  })
-  if (result.canceled) return null
-  return result.filePath
+ipcMain.handle('analyse-file', async (_event, filepath: string) => {
+  const content = await fs.readFile(filepath, 'utf-8')
+  return analyseStepContent(content)
 })
 
-ipcMain.handle('write-file', async (_event, filepath: string, content: Buffer) => {
-  await fs.writeFile(filepath, content)
-  return true
-})
-
-ipcMain.handle('analyse-step', async (_event, filepath: string, quality: string = 'fast') => {
-  const { BrowserWindow } = await import('electron')
-  const w = BrowserWindow.getAllWindows()[0]
-  const onLog = (msg: string) => {
-    if (w && !w.isDestroyed()) w.webContents.send('backend-log', msg)
-  }
-  return NativeBridge.analyseStep(filepath, quality, onLog)
-})
-
-ipcMain.handle('repair-step', async (
+ipcMain.handle('repair-file', async (
   _event,
   filepath: string,
-  outputPath: string,
-  options: { fixNames: boolean; fixShells: boolean; fixHoopsCompat: boolean }
+  fixNames: boolean,
+  fixHoopsCompat: boolean,
 ) => {
-  const { BrowserWindow } = await import('electron')
-  const w = BrowserWindow.getAllWindows()[0]
-  const onLog = (msg: string) => {
-    if (w && !w.isDestroyed()) w.webContents.send('backend-log', msg)
-  }
-  return NativeBridge.repairStep(filepath, outputPath, options, onLog)
-})
+  const content = await fs.readFile(filepath, 'utf-8')
+  const result = repairStepContent(content, fixNames, fixHoopsCompat)
 
-ipcMain.handle('load-step-mesh', async (_event, filepath: string, quality: string = 'standard') => {
-  return NativeBridge.loadStepMesh(filepath, quality)
-})
+  const ext = path.extname(filepath)
+  const base = filepath.slice(0, filepath.length - ext.length)
+  const outputPath = `${base}_fixed${ext}`
+  await fs.writeFile(outputPath, result.content, 'utf-8')
 
-ipcMain.handle('window-minimize', () => { if (win) win.minimize() })
-ipcMain.handle('window-maximize', () => {
-  if (win) {
-    if (win.isMaximized()) win.unmaximize()
-    else win.maximize()
+  return {
+    success: true,
+    outputPath,
+    log: result.log,
+    namesFFixed: result.namesFlagged,
+    hoopsFixed: result.hoopsFixesApplied,
   }
 })
-ipcMain.handle('window-close', () => { if (win) win.close() })
-ipcMain.handle('window-is-maximized', () => (win ? win.isMaximized() : false))
+
+ipcMain.handle('window-close', () => popupWin?.hide())
+ipcMain.handle('quit-app', () => app.quit())
