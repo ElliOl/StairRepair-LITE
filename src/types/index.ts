@@ -2,10 +2,13 @@ import type { TreeNode } from '../lib/stepTree'
 
 export type { TreeNode }
 
+export type AxisSwap = 'none' | 'zUpToYUp' | 'yUpToZUp'
+
 export interface RepairOptions {
   fixNames: boolean
   fixHoopsCompat: boolean
   deleteOriginal: boolean
+  axisSwap: AxisSwap
 }
 
 export interface AppSettings {
@@ -13,6 +16,7 @@ export interface AppSettings {
   fixNames: boolean
   fixHoopsCompat: boolean
   deleteOriginal: boolean
+  axisSwap: AxisSwap
   launchAtLogin: boolean
 }
 
@@ -50,7 +54,7 @@ declare global {
       getRecentFixes: () => Promise<FixResult[]>
       pickFile: () => Promise<string | null>
       analyseFile: (filepath: string) => Promise<{ namesFlagged: number; hoopsCompatFixes: number; tree: TreeNode[] }>
-      repairFile: (filepath: string, fixNames: boolean, fixHoopsCompat: boolean) => Promise<{
+      repairFile: (filepath: string, fixNames: boolean, fixHoopsCompat: boolean, axisSwap: AxisSwap) => Promise<{
         success: boolean
         outputPath: string
         log: string[]

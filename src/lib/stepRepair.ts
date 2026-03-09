@@ -5,6 +5,8 @@
  *   1. PRODUCT entities with name '0' → real name from MSB chain or NAUO fallback
  *   2. HOOPS Exchange per-face color overrides → strip OVER_RIDING_STYLED_ITEM,
  *      rebuild MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION
+ *   3. Axis-swap — rotate all CARTESIAN_POINT and DIRECTION coordinates
+ *      (e.g. Z-up ↔ Y-up) without any geometry library
  */
 
 import {
@@ -18,6 +20,7 @@ import {
   escapeStepString,
   looksLikeFilePath,
 } from './stepParser'
+import type { AxisSwap } from '../types'
 
 interface Patch {
   start: number
@@ -180,6 +183,104 @@ export function buildHoopsPatches(entities: StepEntity[], content: string): Patc
 }
 
 // ---------------------------------------------------------------------------
+// Fix 3: Axis-swap (Z-up ↔ Y-up)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a float back to a STEP real literal.
+ * STEP requires a decimal point in real numbers (e.g. "1." not "1").
+ */
+function formatFloat(n: number): string {
+  if (Object.is(n, -0)) return '-0.'
+  const s = n.toString()
+  if (s.includes('.')) return s
+  // Scientific notation — ensure uppercase E as per STEP convention
+  if (s.includes('e') || s.includes('E')) return s.replace('e', 'E')
+  return s + '.'
+}
+
+// Shape-representation entity types whose items list may contain an
+// AXIS2_PLACEMENT_3D that defines the shape's local-to-world coordinate frame.
+const SHAPE_REP_TYPES = new Set([
+  'SHAPE_REPRESENTATION',
+  'ADVANCED_BREP_SHAPE_REPRESENTATION',
+  'BREP_WITH_VOIDS_SHAPE_REPRESENTATION',
+  'MANIFOLD_SURFACE_SHAPE_REPRESENTATION',
+  'GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION',
+  'GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION',
+  'EDGE_BASED_WIREFRAME_SHAPE_REPRESENTATION',
+])
+
+export function buildAxisSwapPatches(
+  entities: StepEntity[],
+  mode: Exclude<AxisSwap, 'none'>,
+): Patch[] {
+  const byId = new Map<number, StepEntity>()
+  for (const e of entities) byId.set(e.id, e)
+
+  // Collect DIRECTION entity IDs that define a shape representation's coordinate frame.
+  //
+  // A shape representation (ADVANCED_BREP_SHAPE_REPRESENTATION, etc.) includes an
+  // AXIS2_PLACEMENT_3D in its items list.  The CAD reader builds a rotation matrix
+  // from that AP3D and applies it as a LOCAL-TO-WORLD transform on all the geometry.
+  // If we also rotate those DIRECTION vectors, the reader applies a second 90° rotation
+  // on top of the already-rotated geometry — producing 180° instead of 90°.
+  // Solution: leave those frame DIRECTION entities untouched; transform everything else.
+  const frameDirectionIds = new Set<number>()
+  for (const e of entities) {
+    if (!SHAPE_REP_TYPES.has(e.type)) continue
+    // param 1 = items tuple, e.g. (#axis_placement, #solid, ...)
+    for (const ref of parseRefList(getNthParam(e.params, 1))) {
+      const item = byId.get(ref)
+      if (item?.type !== 'AXIS2_PLACEMENT_3D') continue
+      // AXIS2_PLACEMENT_3D params: ('name', #location, #axis_dir, #ref_dir)
+      // param 2 = axis DIRECTION (local Z), param 3 = ref_direction DIRECTION (local X)
+      const axisId = extractRef(getNthParam(item.params, 2))
+      const refDirId = extractRef(getNthParam(item.params, 3))
+      if (axisId >= 0) frameDirectionIds.add(axisId)
+      if (refDirId >= 0) frameDirectionIds.add(refDirId)
+    }
+  }
+
+  const patches: Patch[] = []
+
+  for (const e of entities) {
+    if (e.type !== 'CARTESIAN_POINT' && e.type !== 'DIRECTION') continue
+
+    // Skip DIRECTION entities that are part of a shape representation's coordinate frame —
+    // the CAD reader will apply them as a local-to-world matrix, so rotating them here
+    // would double-apply the rotation.
+    if (e.type === 'DIRECTION' && frameDirectionIds.has(e.id)) continue
+
+    // param 0 = name string, param 1 = coordinate tuple (x,y,z)
+    const tuplePart = getNthParam(e.params, 1).trim()
+    if (!tuplePart.startsWith('(') || !tuplePart.endsWith(')')) continue
+
+    const coords = tuplePart.slice(1, -1).split(',')
+    if (coords.length !== 3) continue
+
+    const x = parseFloat(coords[0])
+    const y = parseFloat(coords[1])
+    const z = parseFloat(coords[2])
+    if (isNaN(x) || isNaN(y) || isNaN(z)) continue
+
+    // Z-up → Y-up: rotate −90° around X  →  (x, y, z) ⟶ (x,  z, −y)
+    // Y-up → Z-up: rotate +90° around X  →  (x, y, z) ⟶ (x, −z,  y)
+    const [nx, ny, nz] = mode === 'zUpToYUp' ? [x, z, -y] : [x, -z, y]
+
+    // Skip coordinates that are unchanged (e.g. pure-X-axis points)
+    if (nx === x && ny === y && nz === z) continue
+
+    const namePart = getNthParam(e.params, 0)
+    const newText =
+      `#${e.id}=${e.type}(${namePart},(${formatFloat(nx)},${formatFloat(ny)},${formatFloat(nz)}));\n`
+    patches.push({ start: e.byteStart, end: e.byteEnd, text: newText })
+  }
+
+  return patches
+}
+
+// ---------------------------------------------------------------------------
 // Apply patches to content string
 // ---------------------------------------------------------------------------
 
@@ -227,12 +328,14 @@ export interface RepairResult {
   log: string[]
   namesFlagged: number
   hoopsFixesApplied: number
+  axisSwapApplied: boolean
 }
 
 export function repairStepContent(
   content: string,
   fixNames: boolean,
   fixHoopsCompat: boolean,
+  axisSwap: AxisSwap = 'none',
 ): RepairResult {
   const entities = collectEntities(content)
   const log: string[] = []
@@ -240,6 +343,7 @@ export function repairStepContent(
 
   let namePatches: Patch[] = []
   let hoopsPatches: Patch[] = []
+  let axisPatches: Patch[] = []
 
   if (fixNames) {
     namePatches = buildNamePatches(entities)
@@ -254,7 +358,6 @@ export function repairStepContent(
   if (fixHoopsCompat) {
     hoopsPatches = buildHoopsPatches(entities, content)
     if (hoopsPatches.length > 0) {
-      // Subtract the MDGPR rebuild patch; remaining are deleted OVER_RIDING_STYLED_ITEM
       const deletedItems = hoopsPatches.filter((p) => p.text === '').length
       log.push(`Stripped ${deletedItems} HOOPS Exchange per-face color override(s)`)
     } else if (content.includes('HOOPS Exchange')) {
@@ -265,7 +368,18 @@ export function repairStepContent(
     patches.push(...hoopsPatches)
   }
 
-  const hadFixes = namePatches.length > 0 || hoopsPatches.length > 0
+  if (axisSwap !== 'none') {
+    axisPatches = buildAxisSwapPatches(entities, axisSwap)
+    const label = axisSwap === 'zUpToYUp' ? 'Z-up → Y-up' : 'Y-up → Z-up'
+    if (axisPatches.length > 0) {
+      log.push(`Axis swap (${label}): rotated ${axisPatches.length} coordinate(s)`)
+    } else {
+      log.push(`Axis swap (${label}): no coordinates found`)
+    }
+    patches.push(...axisPatches)
+  }
+
+  const hadFixes = namePatches.length > 0 || hoopsPatches.length > 0 || axisPatches.length > 0
   const patched = hadFixes
     ? addRepairStamp(applyPatches(content, patches))
     : applyPatches(content, patches)
@@ -275,5 +389,6 @@ export function repairStepContent(
     log,
     namesFlagged: namePatches.length,
     hoopsFixesApplied: hoopsPatches.filter((p) => p.text === '').length,
+    axisSwapApplied: axisPatches.length > 0,
   }
 }

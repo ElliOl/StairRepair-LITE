@@ -40,6 +40,7 @@ export function ManualFix() {
         manualAnalysis.filepath,
         options.fixNames,
         options.fixHoopsCompat,
+        options.axisSwap,
       )
       updateManualAnalysis({
         status: 'done',

@@ -20,8 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Manual fix
   pickFile: () => ipcRenderer.invoke('pick-file'),
   analyseFile: (filepath: string) => ipcRenderer.invoke('analyse-file', filepath),
-  repairFile: (filepath: string, fixNames: boolean, fixHoopsCompat: boolean) =>
-    ipcRenderer.invoke('repair-file', filepath, fixNames, fixHoopsCompat),
+  repairFile: (filepath: string, fixNames: boolean, fixHoopsCompat: boolean, axisSwap: string) =>
+    ipcRenderer.invoke('repair-file', filepath, fixNames, fixHoopsCompat, axisSwap),
 
   // Events from main → renderer
   onFixApplied: (callback: (result: unknown) => void) => {

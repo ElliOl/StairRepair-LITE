@@ -31,11 +31,14 @@ let positionSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 const isMac = process.platform === 'darwin'
 
+type AxisSwap = 'none' | 'zUpToYUp' | 'yUpToZUp'
+
 interface AppSettings {
   watchFolders: string[]
   fixNames: boolean
   fixHoopsCompat: boolean
   deleteOriginal: boolean
+  axisSwap: AxisSwap
   launchAtLogin: boolean
   windowPosition?: { x: number; y: number }
 }
@@ -60,11 +63,12 @@ function getSettingsPath() {
 }
 
 function loadSettings(): AppSettings {
+  const defaults: AppSettings = { watchFolders: [], fixNames: true, fixHoopsCompat: true, deleteOriginal: false, axisSwap: 'none', launchAtLogin: false }
   try {
     const raw = fsSync.readFileSync(getSettingsPath(), 'utf-8')
-    return { fixNames: true, fixHoopsCompat: true, deleteOriginal: false, launchAtLogin: false, watchFolders: [], ...JSON.parse(raw) }
+    return { ...defaults, ...JSON.parse(raw) }
   } catch {
-    return { watchFolders: [], fixNames: true, fixHoopsCompat: true, deleteOriginal: false, launchAtLogin: false }
+    return defaults
   }
 }
 
@@ -74,7 +78,7 @@ function saveSettings(s: AppSettings) {
   fsSync.writeFileSync(sp, JSON.stringify(s, null, 2))
 }
 
-let settings: AppSettings = { watchFolders: [], fixNames: true, fixHoopsCompat: true, deleteOriginal: false, launchAtLogin: false }
+let settings: AppSettings = { watchFolders: [], fixNames: true, fixHoopsCompat: true, deleteOriginal: false, axisSwap: 'none', launchAtLogin: false }
 
 // Tracks files we just wrote so the watcher doesn't re-process them
 const recentlyWritten = new Set<string>()
@@ -98,7 +102,7 @@ async function processFile(filepath: string) {
   const analysis = analyseStepContent(content)
   const { namesFlagged, hoopsCompatFixes } = analysis
 
-  const result = repairStepContent(content, settings.fixNames, settings.fixHoopsCompat)
+  const result = repairStepContent(content, settings.fixNames, settings.fixHoopsCompat, settings.axisSwap)
   const hadIssues = result.namesFlagged > 0 || result.hoopsFixesApplied > 0
 
   let outputPath = filepath
@@ -467,9 +471,10 @@ ipcMain.handle('repair-file', async (
   filepath: string,
   fixNames: boolean,
   fixHoopsCompat: boolean,
+  axisSwap: AxisSwap = 'none',
 ) => {
   const content = await fs.readFile(filepath, 'utf-8')
-  const result = repairStepContent(content, fixNames, fixHoopsCompat)
+  const result = repairStepContent(content, fixNames, fixHoopsCompat, axisSwap)
 
   let outputPath: string
   if (settings.deleteOriginal) {

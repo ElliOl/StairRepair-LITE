@@ -11,7 +11,9 @@ export function TrayHeader() {
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       <div className="flex items-center gap-2">
-        <span className="text-accent font-bold text-sm tracking-tight">StairRepair Lite</span>
+        <span className="text-accent font-bold text-sm tracking-tight">
+          StairRepair <span className="text-text-muted">Lite</span>
+        </span>
       </div>
       <button
         type="button"

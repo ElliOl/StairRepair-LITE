@@ -30,7 +30,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   watchFolders: [],
   watching: false,
-  options: { fixNames: true, fixHoopsCompat: true, deleteOriginal: false },
+  options: { fixNames: true, fixHoopsCompat: true, deleteOriginal: false, axisSwap: 'none' as const },
   launchAtLogin: false,
   recentFixes: [],
   manualAnalysis: null,
