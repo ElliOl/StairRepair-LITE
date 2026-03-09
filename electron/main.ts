@@ -35,6 +35,7 @@ interface AppSettings {
   watchFolders: string[]
   fixNames: boolean
   fixHoopsCompat: boolean
+  deleteOriginal: boolean
   launchAtLogin: boolean
   windowPosition?: { x: number; y: number }
 }
@@ -61,9 +62,9 @@ function getSettingsPath() {
 function loadSettings(): AppSettings {
   try {
     const raw = fsSync.readFileSync(getSettingsPath(), 'utf-8')
-    return { fixNames: true, fixHoopsCompat: true, launchAtLogin: false, watchFolders: [], ...JSON.parse(raw) }
+    return { fixNames: true, fixHoopsCompat: true, deleteOriginal: false, launchAtLogin: false, watchFolders: [], ...JSON.parse(raw) }
   } catch {
-    return { watchFolders: [], fixNames: true, fixHoopsCompat: true, launchAtLogin: false }
+    return { watchFolders: [], fixNames: true, fixHoopsCompat: true, deleteOriginal: false, launchAtLogin: false }
   }
 }
 
@@ -73,7 +74,10 @@ function saveSettings(s: AppSettings) {
   fsSync.writeFileSync(sp, JSON.stringify(s, null, 2))
 }
 
-let settings: AppSettings = { watchFolders: [], fixNames: true, fixHoopsCompat: true, launchAtLogin: false }
+let settings: AppSettings = { watchFolders: [], fixNames: true, fixHoopsCompat: true, deleteOriginal: false, launchAtLogin: false }
+
+// Tracks files we just wrote so the watcher doesn't re-process them
+const recentlyWritten = new Set<string>()
 
 // ---------------------------------------------------------------------------
 // File watcher
@@ -99,10 +103,17 @@ async function processFile(filepath: string) {
 
   let outputPath = filepath
   if (hadIssues) {
-    const ext = path.extname(filepath)
-    const base = filepath.slice(0, filepath.length - ext.length)
-    outputPath = `${base}_fixed${ext}`
-    await fs.writeFile(outputPath, result.content, 'utf-8')
+    if (settings.deleteOriginal) {
+      // Overwrite original in place — guard against watcher re-trigger
+      recentlyWritten.add(filepath)
+      await fs.writeFile(filepath, result.content, 'utf-8')
+      setTimeout(() => recentlyWritten.delete(filepath), 3000)
+    } else {
+      const ext = path.extname(filepath)
+      const base = filepath.slice(0, filepath.length - ext.length)
+      outputPath = `${base}_fixed${ext}`
+      await fs.writeFile(outputPath, result.content, 'utf-8')
+    }
   }
 
   const fixResult: FixResult = {
@@ -135,6 +146,8 @@ async function processFile(filepath: string) {
 function onFileEvent(filepath: string) {
   // Ignore already-fixed output files to avoid infinite loops
   if (/_fixed\.(stp|step)$/i.test(filepath)) return
+  // Ignore files we just wrote ourselves (prevents re-trigger when overwriting originals)
+  if (recentlyWritten.has(filepath)) return
 
   // Debounce: wait 800ms after last event for the same file
   const existing = debounceMap.get(filepath)
@@ -458,10 +471,18 @@ ipcMain.handle('repair-file', async (
   const content = await fs.readFile(filepath, 'utf-8')
   const result = repairStepContent(content, fixNames, fixHoopsCompat)
 
-  const ext = path.extname(filepath)
-  const base = filepath.slice(0, filepath.length - ext.length)
-  const outputPath = `${base}_fixed${ext}`
-  await fs.writeFile(outputPath, result.content, 'utf-8')
+  let outputPath: string
+  if (settings.deleteOriginal) {
+    outputPath = filepath
+    recentlyWritten.add(filepath)
+    await fs.writeFile(filepath, result.content, 'utf-8')
+    setTimeout(() => recentlyWritten.delete(filepath), 3000)
+  } else {
+    const ext = path.extname(filepath)
+    const base = filepath.slice(0, filepath.length - ext.length)
+    outputPath = `${base}_fixed${ext}`
+    await fs.writeFile(outputPath, result.content, 'utf-8')
+  }
 
   return {
     success: true,

@@ -5,12 +5,14 @@ export type { TreeNode }
 export interface RepairOptions {
   fixNames: boolean
   fixHoopsCompat: boolean
+  deleteOriginal: boolean
 }
 
 export interface AppSettings {
   watchFolders: string[]
   fixNames: boolean
   fixHoopsCompat: boolean
+  deleteOriginal: boolean
   launchAtLogin: boolean
 }
 

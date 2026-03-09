@@ -201,6 +201,24 @@ export function applyPatches(content: string, patches: Patch[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Header stamp: insert /* Repaired by StairRepair */ after HEADER; line
+// ---------------------------------------------------------------------------
+
+function addRepairStamp(content: string): string {
+  // Don't double-stamp
+  if (content.includes('/* Repaired by StairRepair */')) return content
+
+  const headerIdx = content.indexOf('HEADER;')
+  const insertAfter = headerIdx !== -1 ? headerIdx + 'HEADER;'.length : -1
+
+  if (insertAfter === -1) return content
+
+  const eol = content.indexOf('\n', insertAfter)
+  const pos = eol === -1 ? insertAfter : eol + 1
+  return content.slice(0, pos) + '/* Repaired by StairRepair */\n' + content.slice(pos)
+}
+
+// ---------------------------------------------------------------------------
 // Public API: patch content string → patched string + log
 // ---------------------------------------------------------------------------
 
@@ -247,7 +265,10 @@ export function repairStepContent(
     patches.push(...hoopsPatches)
   }
 
-  const patched = applyPatches(content, patches)
+  const hadFixes = namePatches.length > 0 || hoopsPatches.length > 0
+  const patched = hadFixes
+    ? addRepairStamp(applyPatches(content, patches))
+    : applyPatches(content, patches)
 
   return {
     content: patched,

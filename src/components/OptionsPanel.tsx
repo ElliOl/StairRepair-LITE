@@ -57,6 +57,12 @@ export function OptionsPanel({ onSettingsChange }: { onSettingsChange?: () => vo
           checked={options.fixHoopsCompat}
           onCheckedChange={(v) => update({ fixHoopsCompat: v })}
         />
+        <OptionRow
+          label="Replace original file"
+          description="Overwrite the original .step instead of creating a separate copy"
+          checked={options.deleteOriginal}
+          onCheckedChange={(v) => update({ deleteOriginal: v })}
+        />
       </div>
     </div>
   )
