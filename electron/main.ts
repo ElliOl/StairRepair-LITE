@@ -27,6 +27,7 @@ let tray: Tray | null = null
 let popupWin: BrowserWindow | null = null
 let watcher: ReturnType<typeof chokidar.watch> | null = null
 let isWatching = false
+let positionSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 const isMac = process.platform === 'darwin'
 
@@ -35,6 +36,7 @@ interface AppSettings {
   fixNames: boolean
   fixHoopsCompat: boolean
   launchAtLogin: boolean
+  windowPosition?: { x: number; y: number }
 }
 
 interface FixResult {
@@ -192,12 +194,14 @@ function getIconPath() {
 function createPopup() {
   popupWin = new BrowserWindow({
     width: 380,
-    height: 560,
+    height: 640,
+    minHeight: 400,
+    minWidth: 320,
     show: false,
     frame: false,
-    resizable: false,
-    movable: false,
-    alwaysOnTop: true,
+    resizable: true,
+    movable: true,
+    alwaysOnTop: false,
     skipTaskbar: true,
     transparent: false,
     backgroundColor: '#0a0a0a',
@@ -215,18 +219,78 @@ function createPopup() {
     popupWin.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
-  // Hide on blur (click outside)
-  popupWin.on('blur', () => {
-    if (process.env.NODE_ENV !== 'development') popupWin?.hide()
+  // Save position when user drags the window (debounced)
+  popupWin.on('move', () => {
+    if (positionSaveTimer) clearTimeout(positionSaveTimer)
+    positionSaveTimer = setTimeout(() => {
+      positionSaveTimer = null
+      saveWindowPosition()
+    }, 300)
   })
 
-  popupWin.on('closed', () => { popupWin = null })
+  // Hide on blur (click outside)
+  popupWin.on('blur', () => {
+    if (process.env.NODE_ENV !== 'development') {
+      if (positionSaveTimer) {
+        clearTimeout(positionSaveTimer)
+        positionSaveTimer = null
+      }
+      saveWindowPosition()
+      popupWin?.hide()
+    }
+  })
+
+  popupWin.on('closed', () => {
+    if (positionSaveTimer) clearTimeout(positionSaveTimer)
+    positionSaveTimer = null
+    popupWin = null
+  })
+}
+
+function saveWindowPosition() {
+  if (!popupWin || !popupWin.isVisible()) return
+  const [x, y] = popupWin.getPosition()
+  settings.windowPosition = { x, y }
+  saveSettings(settings)
 }
 
 function positionPopup() {
   if (!popupWin || !tray) return
   const trayBounds = tray.getBounds()
   const winBounds = popupWin.getBounds()
+  const displays = screen.getAllDisplays()
+
+  let x: number
+  let y: number
+
+  const saved = settings.windowPosition
+  if (saved) {
+    // Check if saved position is on or near a visible display (use bounds for lenient check)
+    const onDisplay = displays.some((d) => {
+      const b = d.bounds
+      const padding = 50
+      return saved.x >= b.x - padding && saved.x < b.x + b.width + padding &&
+             saved.y >= b.y - padding && saved.y < b.y + b.height + padding
+    })
+    if (onDisplay) {
+      const display = screen.getDisplayNearestPoint({ x: saved.x, y: saved.y })
+      const wa = display.workArea
+      x = Math.max(wa.x, Math.min(saved.x, wa.x + wa.width - winBounds.width))
+      y = Math.max(wa.y, Math.min(saved.y, wa.y + wa.height - winBounds.height))
+    } else {
+      ;({ x, y } = getTrayPosition(trayBounds, winBounds))
+    }
+  } else {
+    ;({ x, y } = getTrayPosition(trayBounds, winBounds))
+  }
+
+  popupWin.setPosition(x, y, false)
+}
+
+function getTrayPosition(
+  trayBounds: Electron.Rectangle,
+  winBounds: Electron.Rectangle,
+) {
   const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y })
   const workArea = display.workArea
 
@@ -234,24 +298,24 @@ function positionPopup() {
   let y: number
 
   if (isMac) {
-    // Below menubar
     y = Math.round(trayBounds.y + trayBounds.height + 4)
   } else {
-    // Above system tray (Windows taskbar typically at bottom)
     y = Math.round(trayBounds.y - winBounds.height - 4)
   }
 
-  // Clamp to work area
   x = Math.max(workArea.x + 4, Math.min(x, workArea.x + workArea.width - winBounds.width - 4))
   y = Math.max(workArea.y + 4, Math.min(y, workArea.y + workArea.height - winBounds.height - 4))
-
-  popupWin.setPosition(x, y, false)
+  return { x, y }
 }
 
 function togglePopup() {
   if (!popupWin) return
   if (popupWin.isVisible()) {
-    popupWin.hide()
+    if (popupWin.isFocused()) {
+      popupWin.hide()
+    } else {
+      popupWin.focus()
+    }
   } else {
     positionPopup()
     popupWin.show()
@@ -326,7 +390,9 @@ ipcMain.handle('get-settings', () => ({
 }))
 
 ipcMain.handle('set-settings', (_event, updates: Partial<AppSettings>) => {
+  const prevPosition = settings.windowPosition
   settings = { ...settings, ...updates }
+  if (!('windowPosition' in updates) && prevPosition) settings.windowPosition = prevPosition
   saveSettings(settings)
 
   if ('launchAtLogin' in updates) {
@@ -406,5 +472,8 @@ ipcMain.handle('repair-file', async (
   }
 })
 
-ipcMain.handle('window-close', () => popupWin?.hide())
+ipcMain.handle('window-close', () => {
+  saveWindowPosition()
+  popupWin?.hide()
+})
 ipcMain.handle('quit-app', () => app.quit())

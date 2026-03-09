@@ -49,6 +49,10 @@ export default function App() {
       <div className="flex-1 overflow-y-auto">
         <div className="flex flex-col gap-4 p-4">
 
+          <ManualFix />
+
+          <Separator className="bg-border h-px" />
+
           <WatchFolders />
 
           <Separator className="bg-border h-px" />
@@ -58,10 +62,6 @@ export default function App() {
           <Separator className="bg-border h-px" />
 
           <RecentFixes />
-
-          <Separator className="bg-border h-px" />
-
-          <ManualFix />
 
         </div>
       </div>
