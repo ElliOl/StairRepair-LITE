@@ -2,7 +2,7 @@
 
 Electron tray app that repairs STEP files exported from Plasticity (via HOOPS Exchange) so they import correctly into SolidWorks, Creo, Keyshot, and other professional CAD tools.
 
-**Lite** = pure TypeScript, no native addons. No OpenCASCADE or C++ build required.
+**Lite** = pure TypeScript, no native addons. No OpenCASCADE or C++ build required. No CAD viewer.
 
 ## Fixes
 
