@@ -201,12 +201,12 @@ export function applyPatches(content: string, patches: Patch[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Header stamp: insert /* Repaired by StairRepair */ after HEADER; line
+// Header stamp: insert /* Repaired by StairRepair Lite */ after HEADER; line
 // ---------------------------------------------------------------------------
 
 function addRepairStamp(content: string): string {
   // Don't double-stamp
-  if (content.includes('/* Repaired by StairRepair */')) return content
+  if (content.includes('/* Repaired by StairRepair Lite */')) return content
 
   const headerIdx = content.indexOf('HEADER;')
   const insertAfter = headerIdx !== -1 ? headerIdx + 'HEADER;'.length : -1
@@ -215,7 +215,7 @@ function addRepairStamp(content: string): string {
 
   const eol = content.indexOf('\n', insertAfter)
   const pos = eol === -1 ? insertAfter : eol + 1
-  return content.slice(0, pos) + '/* Repaired by StairRepair */\n' + content.slice(pos)
+  return content.slice(0, pos) + '/* Repaired by StairRepair Lite */\n' + content.slice(pos)
 }
 
 // ---------------------------------------------------------------------------

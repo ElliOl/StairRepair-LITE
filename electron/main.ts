@@ -139,7 +139,7 @@ async function processFile(filepath: string) {
     if (result.namesFlagged > 0) parts.push(`${result.namesFlagged} name(s) fixed`)
     if (result.hoopsFixesApplied > 0) parts.push('HOOPS compat applied')
     const body = hadIssues ? parts.join(', ') : 'No issues found'
-    new Notification({ title: `StairRepair — ${name}`, body }).show()
+    new Notification({ title: `StairRepair Lite — ${name}`, body }).show()
   }
 }
 
@@ -356,7 +356,7 @@ app.whenReady().then(() => {
   icon.addRepresentation({ scaleFactor: 2.0, buffer: raw.toPNG(), width: 32, height: 32 })
   if (isMac) icon.setTemplateImage(true)
   tray = new Tray(icon)
-  tray.setToolTip('StairRepair')
+  tray.setToolTip('StairRepair Lite')
 
   if (isMac) {
     tray.on('click', togglePopup)

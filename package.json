@@ -9,9 +9,10 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:icon": "node scripts/build-icon.js",
     "preview": "electron-vite preview",
-    "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder"
+    "pack": "npm run build && npm run build:icon && electron-builder --dir",
+    "dist": "npm run build && npm run build:icon && electron-builder"
   },
   "dependencies": {
     "@lucide/lab": "^0.1.2",
@@ -37,14 +38,16 @@
     "electron": "^29.4.6",
     "electron-builder": "^24.13.0",
     "electron-vite": "^2.3.0",
+    "ico-to-png": "^0.2.2",
     "postcss": "^8.4.35",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
     "vite": "^5.1.0"
   },
   "build": {
-    "appId": "com.stairrepair.app",
-    "productName": "StairRepair",
+    "appId": "com.stairrepair.lite",
+    "productName": "StairRepair Lite",
     "directories": {
       "output": "release"
     },
@@ -55,9 +58,20 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
+      "icon": "build/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false
     },
