@@ -14,7 +14,7 @@ function FixEntry({ fix }: { fix: FixResult }) {
   if (fix.hoopsFixed > 0) issues.push('HOOPS compat applied')
 
   return (
-    <div className="px-3 py-2 border-b border-border last:border-0">
+    <div className="px-3 py-1.5 border-b border-border last:border-0">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           {fix.hadIssues ? (
@@ -44,14 +44,13 @@ export function RecentFixes() {
 
   return (
     <div className="flex flex-col min-h-0">
-      <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 shrink-0">
+      <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5 shrink-0">
         Recent Fixes
       </p>
       {recentFixes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-6 text-center rounded-md border border-border bg-surface">
-          <AlertCircle className="w-5 h-5 text-text-muted mb-2" />
-          <p className="text-xs text-text-muted">No files processed yet</p>
-          <p className="text-[10px] text-text-muted mt-0.5">Add folders above to start watching</p>
+        <div className="rounded-md border border-border bg-surface px-3 py-1.5 flex items-center gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5 text-text-muted shrink-0" />
+          <span className="text-xs text-text-muted">No files processed yet</span>
         </div>
       ) : (
         <div className="rounded-md border border-border bg-surface overflow-y-auto max-h-44">

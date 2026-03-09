@@ -21,7 +21,7 @@ export default function App() {
     window.electronAPI.getSettings().then((s) => {
       setWatchFolders(s.watchFolders)
       setWatching(s.watching)
-      setOptions({ fixNames: s.fixNames, fixHoopsCompat: s.fixHoopsCompat })
+      setOptions({ fixNames: s.fixNames, fixHoopsCompat: s.fixHoopsCompat, deleteOriginal: s.deleteOriginal ?? false })
       setLaunchAtLogin(s.launchAtLogin)
       setRecentFixes(s.recentFixes ?? [])
     })
@@ -47,7 +47,7 @@ export default function App() {
 
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-4 p-4">
+        <div className="flex flex-col gap-3 p-3">
 
           <ManualFix />
 

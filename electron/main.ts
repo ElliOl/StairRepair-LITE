@@ -207,8 +207,8 @@ function getIconPath() {
 function createPopup() {
   popupWin = new BrowserWindow({
     width: 380,
-    height: 640,
-    minHeight: 400,
+    height: 535,
+    minHeight: 100,
     minWidth: 320,
     show: false,
     frame: false,

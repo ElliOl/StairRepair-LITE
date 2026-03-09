@@ -42,24 +42,24 @@ export function OptionsPanel({ onSettingsChange }: { onSettingsChange?: () => vo
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Options</p>
-      <div className="space-y-3">
+      <div className="space-y-2">
         <OptionRow
           label="Fix part names"
-          description="Rename unnamed PRODUCT entities from NAUO / MSB chain"
+          description="Restore unnamed PRODUCT entities"
           checked={options.fixNames}
           onCheckedChange={(v) => update({ fixNames: v })}
         />
         <OptionRow
           label="Fix HOOPS Exchange compat"
-          description="Strip per-face color overrides that cause import errors in Creo & Keyshot"
+          description="Remove per-face color overrides"
           checked={options.fixHoopsCompat}
           onCheckedChange={(v) => update({ fixHoopsCompat: v })}
         />
         <OptionRow
           label="Replace original file"
-          description="Overwrite the original .step instead of creating a separate copy"
+          description="Overwrite in place, no _fixed copy"
           checked={options.deleteOriginal}
           onCheckedChange={(v) => update({ deleteOriginal: v })}
         />

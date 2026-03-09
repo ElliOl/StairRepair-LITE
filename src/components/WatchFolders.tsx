@@ -36,7 +36,7 @@ export function WatchFolders() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">
           Watched Folders
@@ -45,11 +45,7 @@ export function WatchFolders() {
           {watchFolders.length > 0 && (
             <button
               type="button"
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                watching
-                  ? 'bg-surface-elevated hover:bg-surface-hover text-text-muted border border-border'
-                  : 'bg-accent hover:bg-accent-hover text-white'
-              }`}
+              className="btn btn-ghost flex items-center gap-1 px-2 py-1 text-xs font-medium text-text-muted hover:text-text"
               onClick={handleToggleWatching}
               title={watching ? 'Pause watching' : 'Start watching'}
             >
@@ -62,7 +58,7 @@ export function WatchFolders() {
           )}
           <button
             type="button"
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-surface-elevated hover:bg-surface-hover border border-border text-text transition-colors"
+            className="btn btn-ghost flex items-center gap-1 px-2 py-1 text-xs font-medium text-text-muted hover:text-text"
             onClick={handleAddFolder}
             title="Add folder"
           >
@@ -74,7 +70,7 @@ export function WatchFolders() {
       {watchFolders.length === 0 ? (
         <button
           type="button"
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-md border border-dashed border-border hover:border-accent text-text-muted hover:text-text transition-colors text-sm"
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-md border border-dashed border-border hover:border-accent text-text-muted hover:text-text transition-colors text-sm"
           onClick={handleAddFolder}
         >
           <FolderOpen className="w-4 h-4" />
@@ -123,7 +119,7 @@ export function WatchFolders() {
       )}
 
       {watchFolders.length > 0 && (
-        <div className="flex items-center gap-1.5 pt-0.5">
+        <div className="flex items-center gap-1.5">
           <span
             className={`inline-block w-2 h-2 rounded-full ${
               watching ? 'bg-green-500 animate-pulse' : 'bg-text-muted'

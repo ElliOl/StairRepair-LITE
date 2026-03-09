@@ -62,7 +62,7 @@ export function ManualFix() {
   )
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">
           Manual Fix
@@ -81,7 +81,7 @@ export function ManualFix() {
       {!manualAnalysis ? (
         <button
           type="button"
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-md border border-dashed border-border hover:border-accent text-text-muted hover:text-text transition-colors text-sm"
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-md border border-dashed border-border hover:border-accent text-text-muted hover:text-text transition-colors text-sm"
           onClick={handlePickAndAnalyse}
         >
           <FileSearch className="w-4 h-4" />
