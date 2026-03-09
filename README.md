@@ -1,24 +1,33 @@
-# StepFixer
+# StairRepair Lite
 
-Electron desktop app that repairs STEP files exported from Plasticity (via HOOPS Exchange) so they import correctly into SolidWorks, Creo, Keyshot, and other professional CAD tools.
+Electron tray app that repairs STEP files exported from Plasticity (via HOOPS Exchange) so they import correctly into SolidWorks, Creo, Keyshot, and other professional CAD tools.
+
+**Lite** = pure TypeScript, no native addons. No OpenCASCADE or C++ build required.
 
 ## Fixes
 
-1. **Part name repair** — PRODUCT entities with name `'0'` are replaced with the real part name from NAUO instance labels.
-2. **Disconnected shell split** — Solids that contain multiple geometrically disconnected face regions are split into separate solids.
-3. **HOOPS Exchange compatibility** — Per-face color overrides that cause partial MDGPR coverage are stripped; CAD standard readers (Creo, Solidworks, Keyshot, etc.) otherwise misinterpret this as a second geometric body and import the part as "2 sheets".
+1. **Part name repair** — PRODUCT entities with name `'0'` are replaced with the real part name from NAUO instance labels and the MSB chain.
+2. **HOOPS Exchange compatibility** — Per-face color overrides that cause partial MDGPR coverage are stripped; CAD readers (Creo, SolidWorks, Keyshot, etc.) otherwise misinterpret this as a second geometric body and import the part as "2 sheets".
+
+## What Lite does *not* do
+
+- **Disconnected shell split** — Splitting solids with multiple disconnected face regions requires OpenCASCADE. Use the full StepFixer build for that.
+
+## How it works
+
+- **Watch folders** — Add folders to watch; new or changed `.stp`/`.step` files are auto-repaired and saved as `*_fixed.stp`.
+- **Manual fix** — Browse and fix individual STEP files on demand.
+- **Tray-only** — Lives in the menu bar (macOS) or system tray (Windows). Click to open; click again when focused to close.
 
 ## Requirements
 
 - Node.js 18+
-- OpenCASCADE 7.8.1 at `$HOME/Libraries/opencascade/7.8.1` (or adjust `native/binding.gyp` and `electron/native-bridge.ts` for your install)
-- macOS 10.15+ (or Linux/Windows with matching OCCT build)
+- macOS 10.15+ or Windows
 
 ## Setup
 
 ```bash
 npm install
-cd native && npm install && npm run build && cd ..
 ```
 
 ## Development
@@ -31,15 +40,14 @@ npm run dev
 
 ```bash
 npm run build
-npm run build:native
 npm run dist   # or npm run pack for unpacked app
 ```
 
 ## Project structure
 
-- `electron/` — Main process, preload, native addon bridge
-- `src/` — React UI (Trace-style layout), CAD viewer (R3F), stores, hooks
-- `native/` — C++ addon (node-gyp): STEP read/write, name repair, shell split, HOOPS compat fix, tessellation for viewer
+- `electron/` — Main process, tray, file watcher, IPC
+- `src/` — React UI, stores, repair engine
+- `src/lib/` — Pure TS: `stepParser`, `stepAnalyse`, `stepRepair`, `stepTree` (no native deps)
 
 ## License
 
