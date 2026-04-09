@@ -44,18 +44,35 @@ export function buildNamePatches(entities: StepEntity[]): Patch[] {
     if (n && n !== '0' && n !== ' ') msbName.set(e.id, n)
   }
 
-  // ADVANCED_BREP_SHAPE_REPRESENTATION('', (items...), #ctx)
-  // param 1 items tuple contains the MSB ref → absr_id → msb name
+  // SHAPE_REPRESENTATION and ADVANCED_BREP_SHAPE_REPRESENTATION already carry
+  // the correct assembly/folder name as their own first parameter (e.g. 'spheres',
+  // 'cubes', 'comp').  Build a direct id → name map so we can use these names as
+  // the primary source and avoid misusing the first solid's name as the assembly name.
+  const srOwnName = new Map<number, string>()
+  for (const e of entities) {
+    if (
+      e.type !== 'SHAPE_REPRESENTATION' &&
+      e.type !== 'ADVANCED_BREP_SHAPE_REPRESENTATION'
+    ) continue
+    const n = extractString(getNthParam(e.params, 0))
+    if (n && n !== '0' && n !== ' ') srOwnName.set(e.id, n)
+  }
+
+  // ADVANCED_BREP_SHAPE_REPRESENTATION('name', (items...), #ctx)
+  // Prefer the entity's own name (the assembly/folder name).  Fall back to the
+  // first MSB ref name only when the entity itself has no meaningful name.
   const absrName = new Map<number, string>()
   for (const e of entities) {
     if (e.type !== 'ADVANCED_BREP_SHAPE_REPRESENTATION') continue
+    const ownN = srOwnName.get(e.id)
+    if (ownN) { absrName.set(e.id, ownN); continue }
     for (const ref of parseRefList(getNthParam(e.params, 1))) {
       const n = msbName.get(ref)
       if (n) { absrName.set(e.id, n); break }
     }
   }
 
-  // SHAPE_REPRESENTATION_RELATIONSHIP('','',#sr,#absr) → sr_id → msb name
+  // SHAPE_REPRESENTATION_RELATIONSHIP('','',#sr,#absr) → sr_id → assembly name
   const srName = new Map<number, string>()
   for (const e of entities) {
     if (e.type !== 'SHAPE_REPRESENTATION_RELATIONSHIP') continue
@@ -68,13 +85,15 @@ export function buildNamePatches(entities: StepEntity[]): Patch[] {
     else if (n2) srName.set(id3, n2)
   }
 
-  // SHAPE_DEFINITION_REPRESENTATION(#pds, #sr) → pds_id → msb name
+  // SHAPE_DEFINITION_REPRESENTATION(#pds, #sr) → pds_id → assembly name
+  // Prefer the SR entity's own name (most direct source), then fall back to the
+  // MSB-derived srName built from the relationship chain.
   const pdsName = new Map<number, string>()
   for (const e of entities) {
     if (e.type !== 'SHAPE_DEFINITION_REPRESENTATION') continue
     const pds_id = extractRef(getNthParam(e.params, 0))
     const sr_id = extractRef(getNthParam(e.params, 1))
-    const n = srName.get(sr_id)
+    const n = srOwnName.get(sr_id) ?? srName.get(sr_id)
     if (n !== undefined && pds_id >= 0) pdsName.set(pds_id, n)
   }
 
@@ -144,7 +163,198 @@ export function buildNamePatches(entities: StepEntity[]): Patch[] {
 }
 
 // ---------------------------------------------------------------------------
-// Fix 2: HOOPS Exchange compatibility
+// Fix 2: Decompose multi-body products into single-body leaf products
+//
+// Plasticity bundles multiple solids into one PRODUCT (one ABSR with N MSBs).
+// CAD tools like KeyShot name each body after its parent PRODUCT, so all bodies
+// in a folder show the same name. The fix creates a separate leaf PRODUCT for
+// every MSB, links them into the assembly via NEXT_ASSEMBLY_USAGE_OCCURRENCE,
+// and empties / removes the original multi-body ABSR so nothing renders twice.
+// ---------------------------------------------------------------------------
+
+export function buildDecomposePatches(entities: StepEntity[], content: string): Patch[] {
+  const byId = new Map<number, StepEntity>()
+  for (const e of entities) byId.set(e.id, e)
+
+  let maxId = 0
+  for (const e of entities) if (e.id > maxId) maxId = e.id
+  let nextId = maxId + 1
+  const alloc = () => nextId++
+
+  // ── product_id → pd_id ────────────────────────────────────────────────────
+  const pdFormByProd = new Map<number, number>()
+  const pdByForm = new Map<number, number>()
+  for (const e of entities) {
+    if (
+      e.type === 'PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE' ||
+      e.type === 'PRODUCT_DEFINITION_FORMATION'
+    ) {
+      const prodId = extractRef(getNthParam(e.params, 2))
+      if (prodId >= 0) pdFormByProd.set(prodId, e.id)
+    } else if (e.type === 'PRODUCT_DEFINITION') {
+      const formId = extractRef(getNthParam(e.params, 2))
+      if (formId >= 0) pdByForm.set(formId, e.id)
+    }
+  }
+  const prodToPd = new Map<number, number>()
+  for (const [pId, fId] of pdFormByProd) {
+    const pd = pdByForm.get(fId)
+    if (pd !== undefined) prodToPd.set(pId, pd)
+  }
+
+  // ── pd_id → pds_id (part-level PDS only) → sr_id ─────────────────────────
+  const pdToPds = new Map<number, number>()
+  const pdsToSr = new Map<number, number>()
+  for (const e of entities) {
+    if (e.type === 'PRODUCT_DEFINITION_SHAPE') {
+      const linkedId = extractRef(getNthParam(e.params, 2))
+      if (byId.get(linkedId)?.type === 'PRODUCT_DEFINITION') pdToPds.set(linkedId, e.id)
+    } else if (e.type === 'SHAPE_DEFINITION_REPRESENTATION') {
+      const pdsId = extractRef(getNthParam(e.params, 0))
+      const srId = extractRef(getNthParam(e.params, 1))
+      if (pdsId >= 0 && srId >= 0) pdsToSr.set(pdsId, srId)
+    }
+  }
+
+  // ── sr_id → absr_id + the SRR entity id ──────────────────────────────────
+  const srToAbsr = new Map<number, number>()
+  const srToSrr = new Map<number, number>()
+  for (const e of entities) {
+    if (e.type !== 'SHAPE_REPRESENTATION_RELATIONSHIP') continue
+    const id2 = extractRef(getNthParam(e.params, 2))
+    const id3 = extractRef(getNthParam(e.params, 3))
+    const e3 = byId.get(id3), e2 = byId.get(id2)
+    if (e3?.type === 'ADVANCED_BREP_SHAPE_REPRESENTATION') {
+      srToAbsr.set(id2, id3); srToSrr.set(id2, e.id)
+    } else if (e2?.type === 'ADVANCED_BREP_SHAPE_REPRESENTATION') {
+      srToAbsr.set(id3, id2); srToSrr.set(id3, e.id)
+    }
+  }
+
+  // ── absr_id → [msb_ids], msb_id → name ───────────────────────────────────
+  const absrToMsbs = new Map<number, number[]>()
+  const msbToName = new Map<number, string>()
+  for (const e of entities) {
+    if (e.type === 'MANIFOLD_SOLID_BREP') {
+      const n = extractString(getNthParam(e.params, 0))
+      msbToName.set(e.id, n || `Solid_${e.id}`)
+    } else if (e.type === 'ADVANCED_BREP_SHAPE_REPRESENTATION') {
+      const msbs = parseRefList(getNthParam(e.params, 1)).filter(
+        (r) => byId.get(r)?.type === 'MANIFOLD_SOLID_BREP',
+      )
+      if (msbs.length > 0) absrToMsbs.set(e.id, msbs)
+    }
+  }
+
+  // ── shared context entity ids ─────────────────────────────────────────────
+  let productCtxId = -1, pdCtxId = -1
+  for (const e of entities) {
+    if (e.type === 'PRODUCT_CONTEXT') productCtxId = e.id
+    else if (e.type === 'PRODUCT_DEFINITION_CONTEXT') pdCtxId = e.id
+  }
+  if (productCtxId < 0 || pdCtxId < 0) return []
+
+  const endsecIdx = content.lastIndexOf('ENDSEC;')
+  if (endsecIdx < 0) return []
+
+  const patches: Patch[] = []
+  const newLines: string[] = []
+
+  // ── Walk every PRODUCT, decompose those with 2+ direct MSBs ───────────────
+  for (const prod of entities) {
+    if (prod.type !== 'PRODUCT') continue
+    const pdId = prodToPd.get(prod.id)
+    if (pdId === undefined) continue
+    const pdsId = pdToPds.get(pdId)
+    if (pdsId === undefined) continue
+    const srId = pdsToSr.get(pdsId)
+    if (srId === undefined) continue
+    const absrId = srToAbsr.get(srId)
+    if (absrId === undefined) continue
+    const msbs = absrToMsbs.get(absrId)
+    if (!msbs || msbs.length < 1) continue  // decompose any product with direct MSBs
+
+    const srE = byId.get(srId)!
+    const absrE = byId.get(absrId)!
+    const ctxId = extractRef(getNthParam(srE.params, 2))
+    if (ctxId < 0) continue
+
+    // Remove MSBs from assembly ABSR (geometry moves to child leaf products)
+    const absrNameP = getNthParam(absrE.params, 0)
+    const absrCtxP = getNthParam(absrE.params, 2)
+    patches.push({
+      start: absrE.byteStart, end: absrE.byteEnd,
+      text: `#${absrId}=ADVANCED_BREP_SHAPE_REPRESENTATION(${absrNameP},(),${absrCtxP});\n`,
+    })
+
+    // Delete the SRR that linked the assembly SR → its ABSR (now empty / irrelevant)
+    const srrId = srToSrr.get(srId)
+    if (srrId !== undefined) {
+      const srrE = byId.get(srrId)!
+      patches.push({ start: srrE.byteStart, end: srrE.byteEnd, text: '' })
+    }
+
+    // Create one leaf PRODUCT per MSB and wire it into this assembly via NAUO
+    for (const msbId of msbs) {
+      const solidName = msbToName.get(msbId)!
+      const esc = escapeStepString(solidName)
+
+      // Leaf part: local coordinate frame (identity — body coords are already
+      // in the assembly's frame, so no transform is needed)
+      const cpId = alloc(), d1Id = alloc(), d2Id = alloc(), axId = alloc()
+      const nSrId = alloc(), nAbsrId = alloc(), nSrrId = alloc()
+      const nProdId = alloc(), nPcatId = alloc(), nPdfId = alloc()
+      const nPdId = alloc(), nPdsId = alloc(), nSdrId = alloc(), nDmId = alloc()
+      // NAUO + identity transform
+      const tCpId = alloc(), tD1Id = alloc(), tD2Id = alloc(), tAxId = alloc()
+      const idtId = alloc(), rrId = alloc()
+      const nauoId = alloc(), nauoPdsId = alloc(), cdsrId = alloc()
+
+      // Part local frame
+      newLines.push(`#${cpId}=CARTESIAN_POINT('',(0.,0.,0.));`)
+      newLines.push(`#${d1Id}=DIRECTION('',(0.,0.,1.));`)
+      newLines.push(`#${d2Id}=DIRECTION('',(1.,0.,0.));`)
+      newLines.push(`#${axId}=AXIS2_PLACEMENT_3D('',#${cpId},#${d1Id},#${d2Id});`)
+      // Part representations
+      newLines.push(`#${nSrId}=SHAPE_REPRESENTATION('${esc}',(#${axId}),#${ctxId});`)
+      newLines.push(`#${nAbsrId}=ADVANCED_BREP_SHAPE_REPRESENTATION('${esc}',(#${msbId}),#${ctxId});`)
+      newLines.push(`#${nSrrId}=SHAPE_REPRESENTATION_RELATIONSHIP('','',#${nSrId},#${nAbsrId});`)
+      // Part product hierarchy
+      newLines.push(`#${nProdId}=PRODUCT('${esc}','${esc}','',(#${productCtxId}));`)
+      newLines.push(`#${nPcatId}=PRODUCT_RELATED_PRODUCT_CATEGORY('part','',(#${nProdId}));`)
+      newLines.push(`#${nPdfId}=PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE('','',#${nProdId},.NOT_KNOWN.);`)
+      newLines.push(`#${nPdId}=PRODUCT_DEFINITION('design','',#${nPdfId},#${pdCtxId});`)
+      newLines.push(`#${nPdsId}=PRODUCT_DEFINITION_SHAPE('','',#${nPdId});`)
+      newLines.push(`#${nSdrId}=SHAPE_DEFINITION_REPRESENTATION(#${nPdsId},#${nSrId});`)
+      newLines.push(`#${nDmId}=DRAUGHTING_MODEL('',(),#${ctxId});`)
+      // Identity transform: child frame → parent (assembly) frame
+      newLines.push(`#${tCpId}=CARTESIAN_POINT('',(0.,0.,0.));`)
+      newLines.push(`#${tD1Id}=DIRECTION('',(0.,0.,1.));`)
+      newLines.push(`#${tD2Id}=DIRECTION('',(1.,0.,-0.));`)
+      newLines.push(`#${tAxId}=AXIS2_PLACEMENT_3D('',#${tCpId},#${tD1Id},#${tD2Id});`)
+      newLines.push(`#${idtId}=ITEM_DEFINED_TRANSFORMATION('','',#${tAxId},#${axId});`)
+      newLines.push(
+        `#${rrId}=(REPRESENTATION_RELATIONSHIP('','',#${nSrId},#${srId})` +
+        `REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#${idtId})` +
+        `SHAPE_REPRESENTATION_RELATIONSHIP());`,
+      )
+      // NAUO wiring leaf part into its parent assembly
+      newLines.push(`#${nauoId}=NEXT_ASSEMBLY_USAGE_OCCURRENCE('${esc}_inst','${esc}','${esc}',#${pdId},#${nPdId},$);`)
+      newLines.push(`#${nauoPdsId}=PRODUCT_DEFINITION_SHAPE('','',#${nauoId});`)
+      newLines.push(`#${cdsrId}=CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#${rrId},#${nauoPdsId});`)
+    }
+  }
+
+  // Insert all new entities just before ENDSEC
+  if (newLines.length > 0) {
+    patches.push({ start: endsecIdx, end: endsecIdx, text: newLines.join('\n') + '\n' })
+  }
+
+  return patches
+}
+
+// ---------------------------------------------------------------------------
+// Fix 3: HOOPS Exchange compatibility
 // ---------------------------------------------------------------------------
 
 export function buildHoopsPatches(entities: StepEntity[], content: string): Patch[] {
@@ -329,6 +539,7 @@ export interface RepairResult {
   namesFlagged: number
   hoopsFixesApplied: number
   axisSwapApplied: boolean
+  decomposedProducts: number
 }
 
 export function repairStepContent(
@@ -342,6 +553,7 @@ export function repairStepContent(
   const patches: Patch[] = []
 
   let namePatches: Patch[] = []
+  let decomposePatches: Patch[] = []
   let hoopsPatches: Patch[] = []
   let axisPatches: Patch[] = []
 
@@ -353,6 +565,16 @@ export function repairStepContent(
       log.push('No product name fixes needed')
     }
     patches.push(...namePatches)
+
+    decomposePatches = buildDecomposePatches(entities, content)
+    // Count how many multi-body products were decomposed (each ABSR patch = 1 product)
+    const decomposedCount = decomposePatches.filter(
+      (p) => p.text.includes('ADVANCED_BREP_SHAPE_REPRESENTATION') && p.text.includes('()'),
+    ).length
+    if (decomposedCount > 0) {
+      log.push(`Decomposed ${decomposedCount} multi-body product(s) into named leaf parts`)
+    }
+    patches.push(...decomposePatches)
   }
 
   if (fixHoopsCompat) {
@@ -379,7 +601,15 @@ export function repairStepContent(
     patches.push(...axisPatches)
   }
 
-  const hadFixes = namePatches.length > 0 || hoopsPatches.length > 0 || axisPatches.length > 0
+  const decomposedCount = decomposePatches.filter(
+    (p) => p.text.includes('ADVANCED_BREP_SHAPE_REPRESENTATION') && p.text.includes('()'),
+  ).length
+
+  const hadFixes =
+    namePatches.length > 0 ||
+    decomposePatches.length > 0 ||
+    hoopsPatches.length > 0 ||
+    axisPatches.length > 0
   const patched = hadFixes
     ? addRepairStamp(applyPatches(content, patches))
     : applyPatches(content, patches)
@@ -390,5 +620,6 @@ export function repairStepContent(
     namesFlagged: namePatches.length,
     hoopsFixesApplied: hoopsPatches.filter((p) => p.text === '').length,
     axisSwapApplied: axisPatches.length > 0,
+    decomposedProducts: decomposedCount,
   }
 }

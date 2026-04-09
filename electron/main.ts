@@ -103,7 +103,7 @@ async function processFile(filepath: string) {
   const { namesFlagged, hoopsCompatFixes } = analysis
 
   const result = repairStepContent(content, settings.fixNames, settings.fixHoopsCompat, settings.axisSwap)
-  const hadIssues = result.namesFlagged > 0 || result.hoopsFixesApplied > 0
+  const hadIssues = result.namesFlagged > 0 || result.hoopsFixesApplied > 0 || result.decomposedProducts > 0
 
   let outputPath = filepath
   if (hadIssues) {
@@ -141,6 +141,7 @@ async function processFile(filepath: string) {
   if (Notification.isSupported()) {
     const parts: string[] = []
     if (result.namesFlagged > 0) parts.push(`${result.namesFlagged} name(s) fixed`)
+    if (result.decomposedProducts > 0) parts.push(`${result.decomposedProducts} multi-body product(s) split`)
     if (result.hoopsFixesApplied > 0) parts.push('HOOPS compat applied')
     const body = hadIssues ? parts.join(', ') : 'No issues found'
     new Notification({ title: `StairRepair Lite — ${name}`, body }).show()
