@@ -12,7 +12,7 @@
     "build:icon": "node scripts/build-icon.js",
     "preview": "electron-vite preview",
     "pack": "npm run build && npm run build:icon && electron-builder --dir",
-    "dist": "npm run build && npm run build:icon && electron-builder"
+    "dist": "npm run build && npm run build:icon && electron-builder --mac --publish never && electron-builder --win --x64 --publish never"
   },
   "dependencies": {
     "@lucide/lab": "^0.1.2",

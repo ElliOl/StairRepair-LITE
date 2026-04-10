@@ -35,11 +35,16 @@ interface Patch {
 export function buildNamePatches(entities: StepEntity[]): Patch[] {
   const patches: Patch[] = []
 
-  // MSB name path:
-  // MANIFOLD_SOLID_BREP('name', ...) → msb_id → name
+  // Solid body name path: any solid body type → name (used to infer ABSR/product names)
+  const SOLID_BODY_TYPES = new Set([
+    'MANIFOLD_SOLID_BREP',
+    'BREP_WITH_VOIDS',
+    'FACETED_BREP',
+    'FACETED_BREP_SHELL',
+  ])
   const msbName = new Map<number, string>()
   for (const e of entities) {
-    if (e.type !== 'MANIFOLD_SOLID_BREP') continue
+    if (!SOLID_BODY_TYPES.has(e.type)) continue
     const n = extractString(getNthParam(e.params, 0))
     if (n && n !== '0' && n !== ' ') msbName.set(e.id, n)
   }
@@ -60,7 +65,7 @@ export function buildNamePatches(entities: StepEntity[]): Patch[] {
 
   // ADVANCED_BREP_SHAPE_REPRESENTATION('name', (items...), #ctx)
   // Prefer the entity's own name (the assembly/folder name).  Fall back to the
-  // first MSB ref name only when the entity itself has no meaningful name.
+  // first solid body ref name only when the entity itself has no meaningful name.
   const absrName = new Map<number, string>()
   for (const e of entities) {
     if (e.type !== 'ADVANCED_BREP_SHAPE_REPRESENTATION') continue
@@ -231,16 +236,27 @@ export function buildDecomposePatches(entities: StepEntity[], content: string): 
     }
   }
 
-  // ── absr_id → [msb_ids], msb_id → name ───────────────────────────────────
+  // Solid body entity types that can appear as items in an
+  // ADVANCED_BREP_SHAPE_REPRESENTATION.  All of these must be carried over to
+  // new child leaf products during decomposition — leaving any of them behind
+  // means that solid disappears from the output file.
+  const SOLID_BODY_TYPES = new Set([
+    'MANIFOLD_SOLID_BREP',
+    'BREP_WITH_VOIDS',
+    'FACETED_BREP',
+    'FACETED_BREP_SHELL',
+  ])
+
+  // ── absr_id → [solid_body_ids], solid_body_id → name ────────────────────
   const absrToMsbs = new Map<number, number[]>()
   const msbToName = new Map<number, string>()
   for (const e of entities) {
-    if (e.type === 'MANIFOLD_SOLID_BREP') {
+    if (SOLID_BODY_TYPES.has(e.type)) {
       const n = extractString(getNthParam(e.params, 0))
       msbToName.set(e.id, n || `Solid_${e.id}`)
     } else if (e.type === 'ADVANCED_BREP_SHAPE_REPRESENTATION') {
       const msbs = parseRefList(getNthParam(e.params, 1)).filter(
-        (r) => byId.get(r)?.type === 'MANIFOLD_SOLID_BREP',
+        (r) => SOLID_BODY_TYPES.has(byId.get(r)?.type ?? ''),
       )
       if (msbs.length > 0) absrToMsbs.set(e.id, msbs)
     }
@@ -272,27 +288,27 @@ export function buildDecomposePatches(entities: StepEntity[], content: string): 
     const absrId = srToAbsr.get(srId)
     if (absrId === undefined) continue
     const msbs = absrToMsbs.get(absrId)
-    if (!msbs || msbs.length < 1) continue  // decompose any product with direct MSBs
+    // Only decompose genuine multi-body products (2+ MSBs).
+    // Single-body products must never be touched — decomposing them moves
+    // geometry out of the original ABSR chain and importers that don't fully
+    // resolve NAUO/CDSR will silently lose the solid.
+    if (!msbs || msbs.length < 2) continue
 
     const srE = byId.get(srId)!
     const absrE = byId.get(absrId)!
     const ctxId = extractRef(getNthParam(srE.params, 2))
     if (ctxId < 0) continue
 
-    // Remove MSBs from assembly ABSR (geometry moves to child leaf products)
+    // Clear MSBs from the parent ABSR so geometry is not rendered twice.
+    // The parent ABSR is left as an empty-items node so importers that walk
+    // the SR → SRR → ABSR chain still find a structurally valid (but empty)
+    // representation — they simply won't draw anything from it.
     const absrNameP = getNthParam(absrE.params, 0)
     const absrCtxP = getNthParam(absrE.params, 2)
     patches.push({
       start: absrE.byteStart, end: absrE.byteEnd,
       text: `#${absrId}=ADVANCED_BREP_SHAPE_REPRESENTATION(${absrNameP},(),${absrCtxP});\n`,
     })
-
-    // Delete the SRR that linked the assembly SR → its ABSR (now empty / irrelevant)
-    const srrId = srToSrr.get(srId)
-    if (srrId !== undefined) {
-      const srrE = byId.get(srrId)!
-      patches.push({ start: srrE.byteStart, end: srrE.byteEnd, text: '' })
-    }
 
     // Create one leaf PRODUCT per MSB and wire it into this assembly via NAUO
     for (const msbId of msbs) {
