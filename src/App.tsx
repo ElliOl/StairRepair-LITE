@@ -67,7 +67,8 @@ export default function App() {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-border shrink-0 flex items-center justify-end">
+      <div className="px-4 py-2 border-t border-border shrink-0 flex items-center justify-between">
+        <span className="text-xs text-text-muted select-none">v{__APP_VERSION__}</span>
         <button
           type="button"
           className="text-xs text-text-muted hover:text-text transition-colors"

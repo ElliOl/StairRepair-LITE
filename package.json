@@ -1,6 +1,6 @@
 {
   "name": "stair-repair",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Watches folders for Plasticity STEP exports and auto-repairs naming and HOOPS Exchange issues",
   "main": "./out/main/index.js",
   "author": "",
